@@ -1,5 +1,5 @@
 # Backup Manifest
-This directory contains a backup of the application state as of Sun, 22 Mar 2026 06:33:52 +0000.
+This directory contains a backup of the application state as of 2026-05-19T09:26:15.371Z.
 
 ## Files
 - `App.tsx.bak`: Main application logic and game loop.
