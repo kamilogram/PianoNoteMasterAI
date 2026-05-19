@@ -1,0 +1,70 @@
+import React from 'react';
+import { motion } from 'motion/react';
+
+interface PianoProps {
+  onNotePress: (note: string) => void;
+  activeNotes: Set<string>;
+}
+
+const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const OCTAVES = [2, 3, 4, 5, 6]; // Expanded range to match pools
+
+export const Piano: React.FC<PianoProps> = React.memo(({ onNotePress, activeNotes }) => {
+  const allKeys = OCTAVES.flatMap((octave) =>
+    NOTES.map((note) => ({
+      name: `${note}${octave}`,
+      note,
+      octave,
+      isBlack: note.includes('#'),
+    }))
+  );
+
+  const whiteKeys = allKeys.filter(k => !k.isBlack);
+
+  return (
+    <div className="w-full bg-neutral-900 p-4 rounded-2xl shadow-inner overflow-x-auto custom-scrollbar">
+      <div className="relative flex min-w-max h-48 mx-auto">
+        {/* White Keys */}
+        {whiteKeys.map((key) => (
+          <motion.button
+            key={key.name}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => onNotePress(key.name)}
+            className={`w-10 h-44 border border-neutral-300 rounded-b-lg transition-colors flex-shrink-0 relative ${
+              activeNotes.has(key.name) ? 'bg-blue-400' : 'bg-white hover:bg-neutral-100'
+            }`}
+          >
+            <span className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] font-bold text-neutral-400">
+              {key.octave}
+            </span>
+          </motion.button>
+        ))}
+
+        {/* Black Keys Overlay */}
+        {whiteKeys.map((whiteKey, index) => {
+          // Check if there should be a black key after this white key
+          // Black keys are after C, D, F, G, A
+          const hasBlackKey = ['C', 'D', 'F', 'G', 'A'].includes(whiteKey.note);
+          if (!hasBlackKey || index === whiteKeys.length - 1) return null;
+
+          const blackKeyName = `${whiteKey.note}#${whiteKey.octave}`;
+          const isActive = activeNotes.has(blackKeyName);
+
+          return (
+            <motion.button
+              key={blackKeyName}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => onNotePress(blackKeyName)}
+              className={`absolute z-10 w-7 h-28 rounded-b-md border border-black transition-colors ${
+                isActive ? 'bg-blue-600' : 'bg-neutral-800 hover:bg-neutral-700'
+              }`}
+              style={{
+                left: `${(index + 1) * 40 - 14}px`,
+              }}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+});

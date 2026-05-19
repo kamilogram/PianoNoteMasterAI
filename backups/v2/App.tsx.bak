@@ -1,0 +1,236 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Piano } from './components/Piano';
+import { Staff } from './components/Staff';
+import { audioService } from './services/audioService';
+import { Play, Pause, RotateCcw, Settings, Music, Trophy } from 'lucide-react';
+
+interface Note {
+  id: number;
+  pitch: string;
+  x: number;
+  clef: 'treble' | 'bass';
+  isMissed?: boolean;
+  isHit?: boolean;
+}
+
+const TREBLE_NOTES = ['C4', 'D4', 'E4', 'F4', 'G4', 'A4', 'B4', 'C5', 'D5', 'E5', 'F5', 'G5', 'A5', 'B5', 'C6'];
+const BASS_NOTES = ['C2', 'D2', 'E2', 'F2', 'G2', 'A2', 'B2', 'C3', 'D3', 'E3', 'F3', 'G3', 'A3', 'B3', 'C4'];
+
+const HIT_LINE_X = 150;
+const SPAWN_X = 1000;
+const HIT_THRESHOLD = 40; // Slightly more forgiving
+
+export default function App() {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [speed, setSpeed] = useState(2);
+  const [score, setScore] = useState(0);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [activePianoNotes, setActivePianoNotes] = useState<Set<string>>(new Set());
+  const [feedback, setFeedback] = useState<{ type: 'hit' | 'miss', id: number, message?: string } | null>(null);
+
+  const requestRef = useRef<number>(null);
+  const lastSpawnRef = useRef<number>(0);
+  const notesRef = useRef<Note[]>([]);
+
+  const spawnNote = useCallback(() => {
+    const isTreble = Math.random() > 0.5;
+    const pool = isTreble ? TREBLE_NOTES : BASS_NOTES;
+    const pitch = pool[Math.floor(Math.random() * pool.length)];
+    
+    const newNote: Note = {
+      id: Date.now() + Math.random(),
+      pitch,
+      x: SPAWN_X,
+      clef: isTreble ? 'treble' : 'bass'
+    };
+    
+    notesRef.current = [...notesRef.current, newNote];
+    setNotes(notesRef.current);
+  }, []);
+
+  const gameLoop = useCallback((time: number) => {
+    if (!isPlaying) return;
+
+    // Move notes
+    notesRef.current = notesRef.current
+      .map(note => {
+        const nextX = note.x - speed;
+        // Only mark as missed if it's about to leave the screen
+        // This gives the user more time to guess the focused note
+        if (!note.isMissed && !note.isHit && nextX < 40) {
+          setFeedback({ type: 'miss', id: Date.now(), message: 'MISS' });
+          return { ...note, x: nextX, isMissed: true };
+        }
+        return { ...note, x: nextX };
+      })
+      .filter(note => note.x > -50);
+
+    // Spawn new notes
+    // Adjust spawn rate based on speed to prevent overcrowding
+    const spawnInterval = 3000 / (speed / 2);
+    if (time - lastSpawnRef.current > spawnInterval) {
+      spawnNote();
+      lastSpawnRef.current = time;
+    }
+
+    setNotes([...notesRef.current]);
+    requestRef.current = requestAnimationFrame(gameLoop);
+  }, [isPlaying, speed, spawnNote]);
+
+  useEffect(() => {
+    if (isPlaying) {
+      requestRef.current = requestAnimationFrame(gameLoop);
+    } else if (requestRef.current) {
+      cancelAnimationFrame(requestRef.current);
+    }
+    return () => {
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+    };
+  }, [isPlaying, gameLoop]);
+
+  const handlePianoPress = useCallback((pitch: string) => {
+    audioService.playNote(pitch);
+    
+    if (!isPlaying) {
+      // Just play sound if not in game mode
+      setActivePianoNotes(prev => new Set(prev).add(pitch));
+      setTimeout(() => setActivePianoNotes(prev => {
+        const next = new Set(prev);
+        next.delete(pitch);
+        return next;
+      }), 200);
+      return;
+    }
+
+    // Focus-based hit detection: find the leftmost note that hasn't been hit or missed yet.
+    const targetNote = notesRef.current.find(n => !n.isHit && !n.isMissed);
+
+    if (targetNote && targetNote.pitch === pitch) {
+      setScore(s => s + 10);
+      setFeedback({ type: 'hit', id: Date.now(), message: 'PERFECT!' });
+      // Mark the note as hit
+      notesRef.current = notesRef.current.map(n => 
+        n.id === targetNote.id ? { ...n, isHit: true } : n
+      );
+      setNotes([...notesRef.current]);
+    } else if (targetNote) {
+      // Wrong note pressed for the current target
+      setFeedback({ type: 'miss', id: Date.now(), message: `Pressed ${pitch}` });
+    }
+
+    // Visual feedback on piano
+    setActivePianoNotes(prev => {
+      const next = new Set(prev);
+      next.add(pitch);
+      return next;
+    });
+    setTimeout(() => {
+      setActivePianoNotes(prev => {
+        const next = new Set(prev);
+        next.delete(pitch);
+        return next;
+      });
+    }, 200);
+  }, [isPlaying]);
+
+  const resetGame = () => {
+    setScore(0);
+    setNotes([]);
+    notesRef.current = [];
+    setIsPlaying(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-neutral-50 text-neutral-900 font-sans p-1 md:p-2 flex flex-col items-center overflow-hidden">
+      <header className="w-full max-w-5xl flex justify-between items-center mb-1">
+        <div className="flex items-center gap-2">
+          <div className="bg-blue-600 p-1 rounded-lg text-white">
+            <Music size={16} />
+          </div>
+          <h1 className="text-base font-bold tracking-tight">Piano Note Master</h1>
+        </div>
+        
+        <div className="flex items-center gap-2 md:gap-4">
+          <div className="flex items-center gap-1 bg-white px-2 py-0.5 rounded-full shadow-sm border border-neutral-200">
+            <Trophy size={12} className="text-yellow-500" />
+            <span className="font-mono font-bold text-xs">{score}</span>
+          </div>
+          
+          <div className="hidden sm:flex items-center gap-2 bg-white px-2 py-0.5 rounded-full shadow-sm border border-neutral-200">
+            <Settings size={12} className="text-neutral-400" />
+            <input 
+              type="range" 
+              min="1" 
+              max="10" 
+              step="0.5"
+              value={speed}
+              onChange={(e) => setSpeed(parseFloat(e.target.value))}
+              className="w-16 md:w-24 h-1 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+            />
+            <span className="font-mono font-bold text-[10px] w-5">{speed}</span>
+          </div>
+
+          <button 
+            onClick={() => setIsPlaying(!isPlaying)}
+            className={`flex items-center gap-1 px-3 py-0.5 rounded-full font-semibold transition-all shadow-md text-[10px] md:text-xs ${
+              isPlaying 
+                ? 'bg-neutral-200 text-neutral-700 hover:bg-neutral-300' 
+                : 'bg-blue-600 text-white hover:bg-blue-700'
+            }`}
+          >
+            {isPlaying ? <Pause size={12} /> : <Play size={12} />}
+            {isPlaying ? 'Pause' : 'Start'}
+          </button>
+
+          <button 
+            onClick={resetGame}
+            className="p-1 text-neutral-400 hover:text-neutral-900 transition-colors"
+            title="Reset"
+          >
+            <RotateCcw size={14} />
+          </button>
+        </div>
+      </header>
+
+      <main className="w-full max-w-5xl flex flex-col gap-1">
+        {/* Staff Section */}
+        <section className="relative">
+          <Staff 
+            notes={notes} 
+            speed={speed} 
+            hitLineX={HIT_LINE_X} 
+            focusedNoteId={notes.find(n => !n.isMissed && !n.isHit)?.id}
+          />
+          
+          {/* Feedback Overlay */}
+          <AnimatePresence>
+            {feedback && (
+              <motion.div
+                key={feedback.id}
+                initial={{ opacity: 0, y: 10, scale: 0.8 }}
+                animate={{ opacity: 1, y: -10, scale: 1.1 }}
+                exit={{ opacity: 0 }}
+                className={`absolute left-[150px] top-1/2 -translate-y-1/2 font-bold text-xl z-20 flex flex-col items-center ${
+                  feedback.type === 'hit' ? 'text-green-500' : 'text-red-500'
+                }`}
+              >
+                <span>{feedback.message}</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </section>
+
+        {/* Piano Section */}
+        <section className="w-full">
+          <Piano onNotePress={handlePianoPress} activeNotes={activePianoNotes} />
+        </section>
+      </main>
+    </div>
+  );
+}
