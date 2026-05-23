@@ -12,9 +12,10 @@ import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock } from 'lucide-r
 
 interface Note {
   id: number;
-  displayPitch: string; // Staff position (e.g., "E4")
-  actualPitch: string;  // Piano key (e.g., "D#4")
+  displayPitch: string;
+  actualPitch: string;
   x: number;
+  beatIndex: number;
   clef: 'treble' | 'bass';
   isMissed?: boolean;
   isHit?: boolean;
@@ -96,29 +97,37 @@ const generateRange = (start: string, end: string) => {
   return res;
 };
 
-const HIT_LINE_X = 350;
-const SPAWN_X = 1200;
-
 export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
-  const [speed, setSpeed] = useState(4);
-  const [isAdaptiveSpeed, setIsAdaptiveSpeed] = useState(true);
   const [ledgerLines, setLedgerLines] = useState(2);
   const [useAccidentals, setUseAccidentals] = useState(false);
   const [maxNotesPerSpawn, setMaxNotesPerSpawn] = useState(1);
-  const [keySignature, setKeySignature] = useState<keyof typeof KEY_SIGNATURES>('C Major');
+  const [selectedKeySignature, setSelectedKeySignature] = useState<keyof typeof KEY_SIGNATURES | 'Random'>('C Major');
+  const [activeKeySignature, setActiveKeySignature] = useState<keyof typeof KEY_SIGNATURES>('C Major');
+  const activeKeySignatureRef = useRef<keyof typeof KEY_SIGNATURES>('C Major');
+  const measuresPlayedRef = useRef<number>(0);
   const [score, setScore] = useState(0);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [currentBeat, setCurrentBeat] = useState(0);
+  const [measureId, setMeasureId] = useState(0);
   const [activePianoNotes, setActivePianoNotes] = useState<Map<string, 'hit' | 'miss' | 'default'>>(new Map());
   const [feedback, setFeedback] = useState<{ type: 'hit' | 'miss', id: number, message?: string } | null>(null);
-  const [resumeFactor, setResumeFactor] = useState(1);
+  const [keyChangeAlert, setKeyChangeAlert] = useState<{ id: number; keyName: string } | null>(null);
   const [startTime, setStartTime] = useState<string | null>(null);
   const [isCompact, setIsCompact] = useState(false);
 
-  const requestRef = useRef<number>(null);
+  useEffect(() => {
+    if (keyChangeAlert) {
+      const timer = setTimeout(() => {
+        setKeyChangeAlert(null);
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [keyChangeAlert]);
+
   const notesRef = useRef<Note[]>([]);
-  const streakRef = useRef<number>(0);
-  const isWaitingRef = useRef<boolean>(false);
+  const currentBeatRef = useRef<number>(0);
+  const lastPressBeatRef = useRef<number>(0);
 
   useEffect(() => {
     const mql = window.matchMedia('(min-width: 768px) and (orientation: landscape)');
@@ -128,214 +137,183 @@ export default function App() {
     return () => mql.removeEventListener('change', checkCompact);
   }, []);
 
-  const getBarrierX = useCallback(() => {
-    const sig = KEY_SIGNATURES[keySignature];
-    const sigCount = Math.max(sig.sharps.length, sig.flats.length);
-    // Increased buffer from left: Clef (~80px) + Key Sig (sigCount * 24) + 120px safety
-    return 80 + (sigCount * 24) + 120;
-  }, [keySignature]);
+  const handleKeySignatureChange = useCallback((val: keyof typeof KEY_SIGNATURES | 'Random') => {
+    setSelectedKeySignature(val);
+    if (val === 'Random') {
+      measuresPlayedRef.current = 0;
+      const keys = Object.keys(KEY_SIGNATURES) as Array<keyof typeof KEY_SIGNATURES>;
+      const randomKey = keys[Math.floor(Math.random() * keys.length)];
+      activeKeySignatureRef.current = randomKey;
+      setActiveKeySignature(randomKey);
+      setKeyChangeAlert({ id: Date.now(), keyName: `Losowa tonacja: ${randomKey}` });
+    } else {
+      activeKeySignatureRef.current = val;
+      setActiveKeySignature(val);
+      setKeyChangeAlert({ id: Date.now(), keyName: val });
+    }
+  }, []);
 
-  const spawnNote = useCallback(() => {
-    const count = Math.floor(Math.random() * maxNotesPerSpawn) + 1;
+  const generateMeasure = useCallback(() => {
+    let currentKey = activeKeySignatureRef.current;
+
+    if (selectedKeySignature === 'Random') {
+      const isNewRun = measuresPlayedRef.current === 0;
+      const needsChange = !isNewRun && (measuresPlayedRef.current % 4 === 0);
+      
+      if (isNewRun || needsChange) {
+        const keys = Object.keys(KEY_SIGNATURES) as Array<keyof typeof KEY_SIGNATURES>;
+        const availableKeys = keys.filter(k => k !== currentKey);
+        const randomKey = availableKeys[Math.floor(Math.random() * availableKeys.length)];
+        
+        currentKey = randomKey;
+        activeKeySignatureRef.current = randomKey;
+        setActiveKeySignature(randomKey);
+        setKeyChangeAlert({ id: Date.now(), keyName: randomKey });
+      }
+    }
+    
+    measuresPlayedRef.current += 1;
+
     const newNotes: Note[] = [];
-    const usedPitches = new Set<string>();
+    const beatXs = [300, 500, 700, 900];
+    const measureAccidentals = new Map<string, string>(); // displayPitch -> 'sharp' | 'flat' | 'natural'
 
-    for (let i = 0; i < count; i++) {
-      const isTreble = Math.random() > 0.5;
-      const tPool = getNotePool('treble', ledgerLines);
-      const bPool = getNotePool('bass', ledgerLines);
-      const pool = isTreble ? tPool : bPool;
-      
-      // Try to find a unique pitch for this spawn (Variant 1: No neighbors)
-      let basePitch: string;
-      let attempts = 0;
-      const notes = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+    for (let beatIndex = 0; beatIndex < 4; beatIndex++) {
+      const count = Math.floor(Math.random() * maxNotesPerSpawn) + 1;
+      const xPos = beatXs[beatIndex];
+      const usedNotesInBeat: { pitch: string, isTreble: boolean, abs: number }[] = [];
+      const noteNames = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 
-      const checkValid = (p: string) => {
-        if (usedPitches.has(p)) return false;
-        const pNote = p.slice(0, -1);
-        const pOctave = parseInt(p.slice(-1));
-        const pAbs = pOctave * 7 + notes.indexOf(pNote);
+      for (let i = 0; i < count; i++) {
+        const isTreble = Math.random() > 0.5;
+        const pool = isTreble ? getNotePool('treble', ledgerLines) : getNotePool('bass', ledgerLines);
         
-        for (const usedP of usedPitches) {
-          const uNote = usedP.slice(0, -1);
-          const uOctave = parseInt(usedP.slice(-1));
-          const uAbs = uOctave * 7 + notes.indexOf(uNote);
-          if (Math.abs(pAbs - uAbs) === 1) return false;
+        let basePitch: string = pool[0];
+        let attempts = 0;
+
+        const checkValid = (p: string) => {
+          if (usedNotesInBeat.some(n => n.pitch === p)) return false;
+          const pNote = p.slice(0, -1);
+          const pOctave = parseInt(p.slice(-1));
+          const pAbs = pOctave * 7 + noteNames.indexOf(pNote);
+          
+          let minAbsForClef = pAbs;
+          let maxAbsForClef = pAbs;
+
+          for (const usedN of usedNotesInBeat) {
+            // Avoid seconds universally (so we don't have overlapping notes)
+            if (Math.abs(pAbs - usedN.abs) === 1) return false;
+
+            if (usedN.isTreble === isTreble) {
+              minAbsForClef = Math.min(minAbsForClef, usedN.abs);
+              maxAbsForClef = Math.max(maxAbsForClef, usedN.abs);
+            }
+          }
+          
+          // Constrain notes on the same clef to be within one octave (max interval of 7 diatonic steps)
+          if (maxAbsForClef - minAbsForClef > 7) return false;
+
+          return true;
+        };
+
+        do {
+          basePitch = pool[Math.floor(Math.random() * pool.length)];
+          attempts++;
+        } while (!checkValid(basePitch) && attempts < 50);
+
+        const pNoteInit = basePitch.slice(0, -1);
+        const pOctaveInit = parseInt(basePitch.slice(-1));
+        const pAbsInit = pOctaveInit * 7 + noteNames.indexOf(pNoteInit);
+        usedNotesInBeat.push({ pitch: basePitch, isTreble, abs: pAbsInit });
+        
+        const noteName = basePitch.slice(0, -1);
+        const octave = parseInt(basePitch.slice(-1));
+        const sig = KEY_SIGNATURES[currentKey];
+        
+        let accidental: '♯' | '♭' | '♮' | null = null;
+        let displayPitch = basePitch;
+        let finalActualPitch = basePitch;
+
+        const getShiftedPitch = (note: string, oct: number, shift: 'sharp' | 'flat'): string => {
+          const scale = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+          let index = scale.indexOf(note);
+          if (shift === 'sharp') {
+            index++;
+          } else {
+            index--;
+          }
+          let finalOct = oct;
+          if (index > 11) { index = 0; finalOct++; }
+          if (index < 0) { index = 11; finalOct--; }
+          return `${scale[index]}${finalOct}`;
+        };
+
+        const isSharpInSig = sig.sharps.includes(noteName);
+        const isFlatInSig = sig.flats.includes(noteName);
+        const sigState = isSharpInSig ? 'sharp' : (isFlatInSig ? 'flat' : 'natural');
+        
+        let targetMod = sigState;
+
+        if (currentKey !== 'C Major' && sigState !== 'natural' && Math.random() > 0.8) {
+          targetMod = 'natural';
+        } else if (useAccidentals && Math.random() > 0.7) {
+          const canHaveSharp = ['C', 'D', 'F', 'G', 'A'].includes(noteName);
+          const canHaveFlat = ['D', 'E', 'G', 'A', 'B'].includes(noteName);
+          
+          if (Math.random() > 0.5 && canHaveSharp) {
+            targetMod = 'sharp';
+          } else if (canHaveFlat) {
+            targetMod = 'flat';
+          } else if (canHaveSharp || canHaveFlat) {
+            targetMod = 'natural';
+          }
         }
-        return true;
-      };
 
-      do {
-        basePitch = pool[Math.floor(Math.random() * pool.length)];
-        attempts++;
-      } while (!checkValid(basePitch) && attempts < 20);
-
-      usedPitches.add(basePitch);
-      
-      const noteName = basePitch.slice(0, -1);
-      const octave = parseInt(basePitch.slice(-1));
-      const sig = KEY_SIGNATURES[keySignature];
-      
-      let accidental: '♯' | '♭' | '♮' | null = null;
-      let displayPitch = basePitch;
-      let finalActualPitch = basePitch;
-
-      // Helper to shift pitch for internal piano logic
-      const getShiftedPitch = (note: string, oct: number, shift: 'sharp' | 'flat'): string => {
-        const scale = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-        let index = scale.indexOf(note);
-        if (shift === 'sharp') {
-          index++;
-        } else {
-          index--;
-        }
-        
-        let finalOct = oct;
-        if (index > 11) { index = 0; finalOct++; }
-        if (index < 0) { index = 11; finalOct--; }
-        
-        return `${scale[index]}${finalOct}`;
-      };
-
-      // Apply Key Signature
-      const isSharpInSig = sig.sharps.includes(noteName);
-      const isFlatInSig = sig.flats.includes(noteName);
-
-      if (isSharpInSig) {
-        finalActualPitch = getShiftedPitch(noteName, octave, 'sharp');
-      } else if (isFlatInSig) {
-        finalActualPitch = getShiftedPitch(noteName, octave, 'flat');
-      }
-
-      // Natural Sign Logic (Kasowniki)
-      // If note is in key signature, randomly cancel it with a natural sign
-      if (keySignature !== 'C Major' && (isSharpInSig || isFlatInSig) && Math.random() > 0.8) {
-        accidental = '♮';
-        finalActualPitch = basePitch; // Natural pitch (reset to base)
-      } else if (useAccidentals && Math.random() > 0.7) {
-        // Random Accidental Mode (only if natural sign wasn't applied)
-        const isAlreadySharp = sig.sharps.includes(noteName);
-        const isAlreadyFlat = sig.flats.includes(noteName);
-
-        const canHaveSharp = ['C', 'D', 'F', 'G', 'A'].includes(noteName) && !isAlreadySharp;
-        const canHaveFlat = ['D', 'E', 'G', 'A', 'B'].includes(noteName) && !isAlreadyFlat;
-        
-        if (Math.random() > 0.5 && canHaveSharp) {
-          accidental = '♯';
+        if (targetMod === 'sharp') {
           finalActualPitch = getShiftedPitch(noteName, octave, 'sharp');
-        } else if (canHaveFlat) {
-          accidental = '♭';
+        } else if (targetMod === 'flat') {
           finalActualPitch = getShiftedPitch(noteName, octave, 'flat');
+        } else {
+          finalActualPitch = basePitch;
         }
+
+        const currentMod = measureAccidentals.has(basePitch) ? measureAccidentals.get(basePitch) : sigState;
+
+        if (targetMod !== currentMod) {
+          if (targetMod === 'sharp') accidental = '♯';
+          else if (targetMod === 'flat') accidental = '♭';
+          else accidental = '♮';
+          
+          measureAccidentals.set(basePitch, targetMod);
+        }
+
+        newNotes.push({
+          id: Date.now() + Math.random() + i + beatIndex * 10,
+          displayPitch: displayPitch,
+          actualPitch: finalActualPitch,
+          x: xPos,
+          beatIndex,
+          clef: isTreble ? 'treble' : 'bass',
+          accidental
+        });
       }
-      
-      newNotes.push({
-        id: Date.now() + Math.random() + i,
-        displayPitch: displayPitch,
-        actualPitch: finalActualPitch,
-        x: SPAWN_X,
-        clef: isTreble ? 'treble' : 'bass',
-        accidental
-      });
     }
     
-    notesRef.current = [...notesRef.current, ...newNotes];
+    notesRef.current = newNotes;
+    currentBeatRef.current = 0;
     setNotes(notesRef.current);
-  }, [useAccidentals, keySignature, maxNotesPerSpawn, ledgerLines]);
+    setCurrentBeat(0);
+    setMeasureId(id => id + 1);
+    setActivePianoNotes(new Map());
+    lastPressBeatRef.current = 0;
+  }, [useAccidentals, selectedKeySignature, maxNotesPerSpawn, ledgerLines]);
 
-  const gameLoop = useCallback((time: number) => {
-    if (!isPlaying) return;
-
-    const barrierX = getBarrierX();
-    const BRAKE_DISTANCE = 200; // Distance to begin deceleration
-    
-    const unplayed = notesRef.current.filter(n => !n.isHit && !n.isMissed);
-    const earliestX = unplayed.length > 0 ? Math.min(...unplayed.map(n => n.x)) : Infinity;
-    
-    // Movement Physics: Smooth distance-based deceleration
-    const distanceToStop = Math.max(0, earliestX - barrierX);
-    const isAtBarrier = isAdaptiveSpeed && distanceToStop === 0;
-    const TARGET_RESUME = isAdaptiveSpeed && distanceToStop < BRAKE_DISTANCE 
-      ? (distanceToStop / BRAKE_DISTANCE) 
-      : 1;
-
-    setResumeFactor(prev => {
-      const diff = TARGET_RESUME - prev;
-      // Use higher easing for acceleration, lower for deceleration
-      const easing = TARGET_RESUME > prev ? 0.08 : 0.05;
-      const next = prev + diff * easing;
-      
-      // Speed update logic: if notes have come to a standstill (next close to 0) 
-      // and haven't been cleared, decrease speed.
-      if (isAdaptiveSpeed && prev > 0.01 && next <= 0.01) {
-        // Find notes that are currently at the barrier
-        const currentClusterIdx = notesRef.current.findIndex(n => !n.isHit && !n.isMissed);
-        if (currentClusterIdx !== -1) {
-          const clusterX = notesRef.current[currentClusterIdx].x;
-          const stillInCluster = notesRef.current.some(n => 
-            !n.isHit && !n.isMissed && Math.abs(n.x - clusterX) < 15
-          );
-          
-          if (stillInCluster) {
-            // Cluster reached stop point and is still active. Decrease speed.
-            setSpeed(prevSpeed => Math.max(1, prevSpeed - 0.2));
-            streakRef.current = 0;
-          }
-        }
-      }
-      
-      return next;
-    });
-
-    isWaitingRef.current = isAtBarrier;
-    const effectiveSpeed = speed * (resumeFactor < 0.005 ? 0 : resumeFactor);
-
-    // Move notes
-    notesRef.current = notesRef.current
-      .map(note => {
-        const nextX = note.x - effectiveSpeed;
-        
-        // Only trigger miss if we are NOT in adaptive waiting mode
-        // or if the note somehow passed the barrier
-        if (!note.isMissed && !note.isHit && nextX < 40) {
-          setFeedback({ type: 'miss', id: Date.now(), message: 'MISS' });
-          
-          if (isAdaptiveSpeed) {
-            setSpeed(prev => Math.max(1, prev - 0.2));
-            streakRef.current = 0;
-          }
-          
-          return { ...note, x: nextX, isMissed: true };
-        }
-        return { ...note, x: nextX };
-      })
-      .filter(note => note.x > -50);
-
-    // Spawn new notes - based on distance for equal spacing
-    const MIN_SPAWN_DISTANCE = 300; 
-    const rightmostX = notesRef.current.length > 0 
-      ? Math.max(...notesRef.current.map(n => n.x)) 
-      : -Infinity;
-
-    if (!isAtBarrier && (SPAWN_X - rightmostX >= MIN_SPAWN_DISTANCE)) {
-      spawnNote();
-    }
-
-    setNotes([...notesRef.current]);
-    requestRef.current = requestAnimationFrame(gameLoop);
-  }, [isPlaying, speed, spawnNote, isAdaptiveSpeed, getBarrierX, resumeFactor]);
-
+  // Regenerate on settings change
   useEffect(() => {
     if (isPlaying) {
-      requestRef.current = requestAnimationFrame(gameLoop);
-    } else if (requestRef.current) {
-      cancelAnimationFrame(requestRef.current);
+      generateMeasure();
     }
-    return () => {
-      if (requestRef.current) cancelAnimationFrame(requestRef.current);
-    };
-  }, [isPlaying, gameLoop]);
+  }, [generateMeasure, isPlaying]);
 
   const handlePianoPress = useCallback((pitch: string) => {
     audioService.playNote(pitch);
@@ -352,86 +330,80 @@ export default function App() {
       return;
     }
 
-    // Find the earliest X position of unplayed notes
-    const unplayedNotes = notesRef.current.filter(n => !n.isHit && !n.isMissed);
-    if (unplayedNotes.length === 0) {
-      status = 'miss';
-    } else {
-      const earliestX = Math.min(...unplayedNotes.map(n => n.x));
-      // Find a note at this X position that matches the pressed pitch
-      // We allow a small tolerance for X if they were spawned together
-      const matchingNote = unplayedNotes.find(n => 
-        Math.abs(n.x - earliestX) < 5 && n.actualPitch === pitch
-      );
-
-      if (matchingNote) {
-        status = 'hit';
-        setScore(s => s + 10);
-        setFeedback({ type: 'hit', id: Date.now(), message: 'PERFECT!' });
-        
-        // Start moving again after a hit
-        if (isWaitingRef.current) {
-          // Push it slightly to trigger movement if last in cluster
-          setResumeFactor(prev => Math.max(prev, 0.05));
-        }
-
-        // Adaptive Speed: Speed up ONLY if we are CLEARING the cluster while it's still moving
-        // (i.e., resumeFactor is relatively high)
-        if (isAdaptiveSpeed) {
-          // We check if this was the last note in the current visual cluster
-          const otherInCluster = unplayedNotes.some(n => 
-            n.id !== matchingNote.id && Math.abs(n.x - earliestX) < 10
-          );
-
-          if (!otherInCluster) {
-            // Cluster cleared!
-            // If the cluster was cleared while moving (resumeFactor > 0.5), increase speed
-            if (resumeFactor > 0.5) {
-              streakRef.current += 1;
-              setSpeed(prev => Math.min(10, prev + 0.05 + (streakRef.current > 3 ? 0.1 : 0)));
-            }
-          }
-        }
-
-        notesRef.current = notesRef.current.map(n => 
-          n.id === matchingNote.id ? { ...n, isHit: true } : n
-        );
-        setNotes([...notesRef.current]);
-      } else {
-        status = 'miss';
-        // If no matching note at the earliest X, it's a miss
-        setFeedback({ type: 'miss', id: Date.now(), message: `Pressed ${pitch}` });
-        
-        // Adaptive Speed: Slow down on wrong note
-        if (isAdaptiveSpeed) {
-          setSpeed(prev => Math.max(1, prev - 0.2));
-          streakRef.current = 0;
-        }
-      }
+    const currentNotes = notesRef.current;
+    let beat = currentBeatRef.current;
+    
+    const unplayedInBeat = currentNotes.filter(n => n.beatIndex === beat && !n.isHit);
+    
+    if (unplayedInBeat.length === 0) {
+      return; // Waiting for new measure
     }
 
+    const matchingNote = unplayedInBeat.find(n => n.actualPitch === pitch);
+
+    let isLastOfBeat = false;
+
+    if (matchingNote) {
+      status = 'hit';
+      setScore(s => s + 10);
+      setFeedback({ type: 'hit', id: Date.now(), message: 'PERFECT!' });
+
+      notesRef.current = currentNotes.map(n => 
+        n.id === matchingNote.id ? { ...n, isHit: true } : n
+      );
+      
+      const newUnplayed = notesRef.current.filter(n => n.beatIndex === beat && !n.isHit);
+      
+      if (newUnplayed.length === 0) {
+        isLastOfBeat = true;
+        if (beat < 3) {
+          currentBeatRef.current = beat + 1;
+          setCurrentBeat(beat + 1);
+        } else {
+          // Reached end of measure
+          setTimeout(() => {
+            if (isPlaying) generateMeasure(); // only generate if still playing
+          }, 500);
+        }
+        
+        // Clear piano keys shortly after beat completes
+        setTimeout(() => {
+          setActivePianoNotes(new Map());
+        }, 150);
+      }
+    } else {
+      status = 'miss';
+      setScore(s => Math.max(0, s - 5));
+      setFeedback({ type: 'miss', id: Date.now(), message: `Pressed ${pitch}` });
+    }
+
+    setNotes([...notesRef.current]);
+
     setActivePianoNotes(prev => {
-      const next = new Map(prev);
+      let next;
+      // Start fresh if we are on a new beat
+      if (lastPressBeatRef.current !== beat) {
+        next = new Map();
+        lastPressBeatRef.current = beat;
+      } else {
+        next = new Map(prev);
+      }
       next.set(pitch, status);
       return next;
     });
-    setTimeout(() => {
-      setActivePianoNotes(prev => {
-        const next = new Map(prev);
-        next.delete(pitch);
-        return next;
-      });
-    }, 200);
-  }, [isPlaying, isAdaptiveSpeed]);
+  }, [isPlaying, generateMeasure]);
 
   const resetGame = () => {
     setScore(0);
     setNotes([]);
     notesRef.current = [];
+    setCurrentBeat(0);
+    currentBeatRef.current = 0;
     setIsPlaying(false);
-    streakRef.current = 0;
-    setSpeed(2);
     setStartTime(null);
+    setActivePianoNotes(new Map());
+    lastPressBeatRef.current = 0;
+    measuresPlayedRef.current = 0;
   };
 
   return (
@@ -447,10 +419,11 @@ export default function App() {
         <div className={`flex flex-wrap items-center justify-center ${isCompact ? 'gap-1 md:gap-2' : 'gap-2 md:gap-4'}`}>
           {/* Key Signature Selector */}
           <select 
-            value={keySignature}
-            onChange={(e) => setKeySignature(e.target.value as any)}
+            value={selectedKeySignature}
+            onChange={(e) => handleKeySignatureChange(e.target.value as any)}
             className={`${isCompact ? 'text-[10px]' : 'text-xs md:text-sm'} bg-white border border-neutral-200 rounded-full px-3 py-1 shadow-sm outline-none focus:ring-2 focus:ring-blue-500`}
           >
+            <option value="Random">Losowo (co 4 takty)</option>
             {Object.keys(KEY_SIGNATURES).map(k => (
               <option key={k} value={k}>{k}</option>
             ))}
@@ -464,16 +437,6 @@ export default function App() {
             }`}
           >
             {isCompact ? 'Acc' : 'Accidentals'}: {useAccidentals ? 'ON' : 'OFF'}
-          </button>
-
-          {/* Adaptive Speed Toggle */}
-          <button 
-            onClick={() => setIsAdaptiveSpeed(!isAdaptiveSpeed)}
-            className={`${isCompact ? 'text-[10px] px-2' : 'text-xs md:text-sm px-4'} py-1 rounded-full border transition-all ${
-              isAdaptiveSpeed ? 'bg-green-100 border-green-300 text-green-700' : 'bg-white border-neutral-200 text-neutral-500'
-            }`}
-          >
-            {isCompact ? 'Adapt' : 'Adaptive'}: {isAdaptiveSpeed ? 'ON' : 'OFF'}
           </button>
 
           {/* Ledger Lines Selector */}
@@ -508,26 +471,13 @@ export default function App() {
             <Trophy size={isCompact ? 12 : 16} className="text-yellow-500" />
             <span className={`font-mono font-bold ${isCompact ? 'text-xs' : 'text-sm'}`}>{score}</span>
           </div>
-          
-          <div className="hidden lg:flex items-center gap-3 bg-white px-3 py-1 rounded-full shadow-sm border border-neutral-200">
-            <Settings size={14} className="text-neutral-400" />
-            <input 
-              type="range" 
-              min="1" 
-              max="10" 
-              step="0.5"
-              value={speed}
-              onChange={(e) => setSpeed(parseFloat(e.target.value))}
-              disabled={isAdaptiveSpeed}
-              className="w-24 md:w-32 h-1.5 bg-neutral-200 rounded-lg appearance-none cursor-pointer accent-blue-600 disabled:opacity-50"
-            />
-            <span className="font-mono font-bold text-xs w-6">{speed.toFixed(1)}</span>
-          </div>
 
           <button 
             onClick={() => {
               if (!isPlaying && !startTime) {
                 setStartTime(new Date().toLocaleTimeString());
+                measuresPlayedRef.current = 0;
+                generateMeasure();
               }
               setIsPlaying(!isPlaying);
             }}
@@ -553,19 +503,13 @@ export default function App() {
 
       <main className={`w-full max-w-5xl md:landscape:max-w-none xl:max-w-5xl flex flex-col ${isCompact ? 'gap-1' : 'gap-4'}`}>
         {/* Staff Section */}
-        <section className="relative">
+        <section className={`relative rounded-xl transition-all duration-500 ${keyChangeAlert ? 'ring-4 ring-amber-400 shadow-[0_0_25px_rgba(245,158,11,0.45)]' : ''}`}>
           <Staff 
-            notes={notes} 
-            speed={speed} 
-            hitLineX={HIT_LINE_X} 
-            focusedNoteIds={(() => {
-              const unplayed = notes.filter(n => !n.isMissed && !n.isHit);
-              if (unplayed.length === 0) return [];
-              const earliestX = Math.min(...unplayed.map(n => n.x));
-              return unplayed.filter(n => Math.abs(n.x - earliestX) < 5).map(n => n.id);
-            })()}
-            keySignature={keySignature}
+            notes={notes}
+            currentBeat={currentBeat}
+            keySignature={activeKeySignature}
             isCompact={isCompact}
+            measureId={measureId}
           />
           
           {/* Feedback Overlay */}
@@ -576,11 +520,40 @@ export default function App() {
                 initial={{ opacity: 0, y: 10, scale: 0.8 }}
                 animate={{ opacity: 1, y: -10, scale: 1.1 }}
                 exit={{ opacity: 0 }}
-                className={`absolute left-[350px] top-1/2 -translate-y-1/2 font-bold text-xl z-20 flex flex-col items-center ${
+                className={`absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 font-bold text-xl z-20 flex flex-col items-center ${
                   feedback.type === 'hit' ? 'text-green-500' : 'text-red-500'
                 }`}
               >
                 <span>{feedback.message}</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Key Signature Change Announcement Overlay */}
+          <AnimatePresence>
+            {keyChangeAlert && (
+              <motion.div
+                key={`keychange-${keyChangeAlert.id}`}
+                initial={{ opacity: 0, scale: 0.8, y: -15, filter: 'blur(4px)' }}
+                animate={{ opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }}
+                exit={{ opacity: 0, scale: 0.85, y: 15, filter: 'blur(4px)' }}
+                transition={{ type: 'spring', damping: 14, stiffness: 120 }}
+                className="absolute inset-x-4 top-1/2 -translate-y-1/2 p-4 md:p-5 rounded-2xl bg-amber-500/95 backdrop-blur-md shadow-[0_20px_50px_rgba(245,158,11,0.35)] border border-amber-300 z-30 flex items-center justify-between gap-4 max-w-sm md:max-w-md mx-auto"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-2 md:p-2.5 bg-white/20 rounded-xl text-white">
+                    <Music className="w-5 h-5 md:w-6 md:h-6 animate-bounce" />
+                  </div>
+                  <div className="flex flex-col text-left">
+                    <span className="text-[9px] md:text-[10px] uppercase font-bold tracking-widest text-amber-100">Zmiana Tonacji</span>
+                    <span className="text-base md:text-xl font-extrabold text-white leading-tight">
+                      {keyChangeAlert.keyName}
+                    </span>
+                  </div>
+                </div>
+                <div className="shrink-0 text-right bg-white/20 text-white rounded-full px-2.5 py-1 text-[10px] md:text-xs font-bold uppercase tracking-wider">
+                  ZMIANA
+                </div>
               </motion.div>
             )}
           </AnimatePresence>

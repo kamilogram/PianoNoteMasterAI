@@ -1,10 +1,12 @@
 import React, { useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface Note {
   id: number;
-  displayPitch: string; // Staff position (e.g., "E4")
-  actualPitch: string;  // Piano key (e.g., "D#4")
+  displayPitch: string;
+  actualPitch: string;
   x: number;
+  beatIndex: number;
   clef: 'treble' | 'bass';
   isHit?: boolean;
   isMissed?: boolean;
@@ -13,11 +15,10 @@ interface Note {
 
 interface StaffProps {
   notes: Note[];
-  speed: number;
-  hitLineX: number;
-  focusedNoteIds?: number[];
+  currentBeat?: number;
   keySignature?: string;
   isCompact?: boolean;
+  measureId?: number;
 }
 
 // Scaling constants
@@ -81,8 +82,9 @@ const getBassKeyPos = (pitch: string): string => {
   return `${note}${octave - 2}`;
 };
 
-export const Staff: React.FC<StaffProps> = React.memo(({ notes, speed, hitLineX, focusedNoteIds = [], keySignature = 'C Major', isCompact = false }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0, keySignature = 'C Major', isCompact = false, measureId = 0 }) => {
+  const bgCanvasRef = useRef<HTMLCanvasElement>(null);
+  const fgCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const LINE_SPACING = isCompact ? COMPACT_LINE_SPACING : DEFAULT_LINE_SPACING;
   const STEP_SPACING = LINE_SPACING / 2;
@@ -93,150 +95,191 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, speed, hitLineX,
   const BASS_OFFSET = isCompact ? COMPACT_BASS_OFFSET : DEFAULT_BASS_OFFSET;
   const canvasHeight = isCompact ? 400 : 640;
 
+  // Background Canvas Effect (Lines, Clefs, Key Signature)
   useEffect(() => {
-    const canvas = canvasRef.current;
+    const canvas = bgCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const draw = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw active beat highlight behind lines
+    const activeNotes = notes.filter(n => n.beatIndex === currentBeat);
+    if (activeNotes.length > 0) {
+      const minX = Math.min(...activeNotes.map(n => n.x));
+      const maxX = Math.max(...activeNotes.map(n => n.x));
+      const centerX = (minX + maxX) / 2;
+      const rectWidth = isCompact ? 80 : 120;
       
-      const drawClefStaff = (yOffset: number, label: string, clefSymbol: string, clefType: 'treble' | 'bass') => {
-        ctx.strokeStyle = '#333';
-        ctx.lineWidth = 1.8;
-        
-        // Draw 5 lines
-        for (let i = 0; i < 5; i++) {
-          const y = yOffset + i * LINE_SPACING + STAFF_PADDING;
-          ctx.beginPath();
-          ctx.moveTo(0, y);
-          ctx.lineTo(canvas.width, y);
-          ctx.stroke();
-        }
-
-        // Clef Symbol
-        ctx.fillStyle = '#000';
-        ctx.font = `${isCompact ? 60 : 90}px serif`;
-        ctx.fillText(clefSymbol, CLEF_X, yOffset + STAFF_PADDING + 3.5 * LINE_SPACING);
-
-        // Key Signature
-        const sig = KEY_SIGNATURE_MAP[keySignature];
-        ctx.font = `${isCompact ? 32 : 48}px serif`;
-        let sigX = SIG_START_X;
-        
-        sig.sharps.forEach(note => {
-          const pitch = clefType === 'treble' ? note : getBassKeyPos(note);
-          const y = yOffset + getNoteY(pitch, clefType, STAFF_PADDING, LINE_SPACING);
-          ctx.fillText('♯', sigX, y + (isCompact ? 12 : 18));
-          sigX += SIG_STEP_X;
-        });
-        
-        sig.flats.forEach(note => {
-          const pitch = clefType === 'treble' ? note : getBassKeyPos(note);
-          const y = yOffset + getNoteY(pitch, clefType, STAFF_PADDING, LINE_SPACING);
-          ctx.fillText('♭', sigX, y + (isCompact ? 12 : 18));
-          sigX += SIG_STEP_X;
-        });
-
-        // Label
-        ctx.fillStyle = '#999';
-        ctx.font = `italic ${isCompact ? 10 : 12}px Georgia, serif`;
-        ctx.fillText(label, 15, yOffset + STAFF_PADDING - (isCompact ? 20 : 30));
-      };
-
-      // Draw Treble Staff
-      drawClefStaff(0, 'TREBLE CLEF', '𝄞', 'treble');
-      // Draw Bass Staff
-      drawClefStaff(BASS_OFFSET, 'BASS CLEF', '𝄢', 'bass');
-
-      // Draw Notes
-      notes.forEach(note => {
-        const yBase = note.clef === 'treble' ? 0 : BASS_OFFSET;
-        const y = yBase + getNoteY(note.displayPitch, note.clef, STAFF_PADDING, LINE_SPACING);
-        const isFocused = focusedNoteIds.includes(note.id);
-        const isHit = note.isHit;
-        const isMissed = note.isMissed;
-        
-        if (isHit) {
-          ctx.fillStyle = '#22C55E';
-          ctx.strokeStyle = '#22C55E';
-        } else if (isMissed) {
-          ctx.fillStyle = '#EF4444';
-          ctx.strokeStyle = '#EF4444';
-        } else if (isFocused) {
-          ctx.fillStyle = '#EAB308';
-          ctx.strokeStyle = '#000';
-        } else {
-          ctx.fillStyle = '#000';
-          ctx.strokeStyle = '#000';
-        }
-        
-        ctx.lineWidth = 2;
-        
-        const headW = isCompact ? 9 : 13;
-        const headH = isCompact ? 6 : 9;
-
-        // Scaled note head
+      ctx.fillStyle = '#FEF08A'; // light yellow highlight
+      
+      const staffTop = STAFF_PADDING - 20;
+      const staffBottom = BASS_OFFSET + STAFF_PADDING + 4 * LINE_SPACING + 20;
+      const rectHeight = staffBottom - staffTop;
+      
+      ctx.fillRect(centerX - rectWidth / 2, staffTop, rectWidth, rectHeight);
+    }
+    
+    const drawClefStaff = (yOffset: number, label: string, clefSymbol: string, clefType: 'treble' | 'bass') => {
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 1.8;
+      
+      // Draw 5 lines
+      for (let i = 0; i < 5; i++) {
+        const y = yOffset + i * LINE_SPACING + STAFF_PADDING;
         ctx.beginPath();
-        ctx.ellipse(note.x, y, headW, headH, Math.PI / -6, 0, Math.PI * 2);
-        ctx.fill();
-        if (isFocused && !isHit && !isMissed) {
-          ctx.stroke(); 
-        }
-
-        // Stem
-        ctx.lineWidth = isCompact ? 1.2 : 1.8;
-        ctx.beginPath();
-        const stemXOffset = isCompact ? 8 : 12;
-        const stemHeight = isCompact ? 35 : 52;
-        ctx.moveTo(note.x + stemXOffset, y);
-        ctx.lineTo(note.x + stemXOffset, y - stemHeight);
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
         ctx.stroke();
+      }
 
-        // Ledger lines
-        ctx.strokeStyle = isHit ? '#22C55E' : (isMissed ? '#EF4444' : '#000');
-        const staffTop = yBase + STAFF_PADDING;
-        const staffBottom = yBase + STAFF_PADDING + 4 * LINE_SPACING;
-        
-        const ledgerW = isCompact ? 14 : 21;
+      // Clef Symbol
+      ctx.fillStyle = '#000';
+      ctx.font = `${isCompact ? 60 : 90}px serif`;
+      ctx.fillText(clefSymbol, CLEF_X, yOffset + STAFF_PADDING + 3.5 * LINE_SPACING);
 
-        if (y <= staffTop - STEP_SPACING) {
-          for (let ly = staffTop - LINE_SPACING; ly >= y - 4; ly -= LINE_SPACING) {
-            ctx.beginPath();
-            ctx.moveTo(note.x - ledgerW, ly);
-            ctx.lineTo(note.x + ledgerW, ly);
-            ctx.stroke();
-          }
-        } else if (y >= staffBottom + STEP_SPACING) {
-          for (let ly = staffBottom + LINE_SPACING; ly <= y + 4; ly += LINE_SPACING) {
-            ctx.beginPath();
-            ctx.moveTo(note.x - ledgerW, ly);
-            ctx.lineTo(note.x + ledgerW, ly);
-            ctx.stroke();
-          }
-        }
-
-        // Accidental sign
-        if (note.accidental) {
-          ctx.fillStyle = isHit ? '#22C55E' : (isMissed ? '#EF4444' : '#000');
-          ctx.font = `bold ${isCompact ? 36 : 54}px serif`;
-          ctx.fillText(note.accidental, note.x - (isCompact ? 34 : 51), y + (isCompact ? 12 : 18));
-        }
+      // Key Signature
+      const sig = KEY_SIGNATURE_MAP[keySignature];
+      ctx.font = `${isCompact ? 32 : 48}px serif`;
+      let sigX = SIG_START_X;
+      
+      sig.sharps.forEach(note => {
+        const pitch = clefType === 'treble' ? note : getBassKeyPos(note);
+        const y = yOffset + getNoteY(pitch, clefType, STAFF_PADDING, LINE_SPACING);
+        ctx.fillText('♯', sigX, y + (isCompact ? 12 : 18));
+        sigX += SIG_STEP_X;
       });
+      
+      sig.flats.forEach(note => {
+        const pitch = clefType === 'treble' ? note : getBassKeyPos(note);
+        const y = yOffset + getNoteY(pitch, clefType, STAFF_PADDING, LINE_SPACING);
+        ctx.fillText('♭', sigX, y + (isCompact ? 12 : 18));
+        sigX += SIG_STEP_X;
+      });
+
+      // Label
+      ctx.fillStyle = '#999';
+      ctx.font = `italic ${isCompact ? 10 : 12}px Georgia, serif`;
+      ctx.fillText(label, 15, yOffset + STAFF_PADDING - (isCompact ? 20 : 30));
     };
 
-    draw();
-  }, [notes, hitLineX, focusedNoteIds, keySignature, isCompact, LINE_SPACING, STEP_SPACING, STAFF_PADDING, CLEF_X, SIG_START_X, SIG_STEP_X, BASS_OFFSET]);
+    // Draw Treble Staff
+    drawClefStaff(0, 'TREBLE CLEF', '𝄞', 'treble');
+    // Draw Bass Staff
+    drawClefStaff(BASS_OFFSET, 'BASS CLEF', '𝄢', 'bass');
+
+    // Draw final measure barline connecting both staves
+    const staffTop = STAFF_PADDING;
+    const staffBottom = BASS_OFFSET + STAFF_PADDING + 4 * LINE_SPACING;
+    
+    ctx.beginPath();
+    ctx.moveTo(980, staffTop);
+    ctx.lineTo(980, staffBottom);
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = isCompact ? 1.5 : 2;
+    ctx.stroke();
+
+    // Draw initial measure barline (before clefs)
+    ctx.beginPath();
+    ctx.moveTo(10, staffTop);
+    ctx.lineTo(10, staffBottom);
+    ctx.stroke();
+  }, [notes, currentBeat, keySignature, isCompact, LINE_SPACING, STAFF_PADDING, CLEF_X, SIG_START_X, SIG_STEP_X, BASS_OFFSET]);
+
+  // Foreground Canvas Effect (Notes, Accidentals, Ledger Lines)
+  useEffect(() => {
+    const canvas = fgCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    notes.forEach(note => {
+      const yBase = note.clef === 'treble' ? 0 : BASS_OFFSET;
+      const y = yBase + getNoteY(note.displayPitch, note.clef, STAFF_PADDING, LINE_SPACING);
+      
+      ctx.fillStyle = '#000';
+      ctx.strokeStyle = '#000';
+      
+      ctx.lineWidth = 2;
+      
+      const headW = isCompact ? 9 : 13;
+      const headH = isCompact ? 6 : 9;
+
+      // Scaled note head
+      ctx.beginPath();
+      ctx.ellipse(note.x, y, headW, headH, Math.PI / -6, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Stem
+      ctx.lineWidth = isCompact ? 1.2 : 1.8;
+      ctx.beginPath();
+      const stemXOffset = isCompact ? 8 : 12;
+      const stemHeight = isCompact ? 35 : 52;
+      ctx.moveTo(note.x + stemXOffset, y);
+      ctx.lineTo(note.x + stemXOffset, y - stemHeight);
+      ctx.stroke();
+
+      // Ledger lines
+      ctx.strokeStyle = '#000';
+      const staffTopLine = yBase + STAFF_PADDING;
+      const staffBottomLine = yBase + STAFF_PADDING + 4 * LINE_SPACING;
+      
+      const ledgerW = isCompact ? 14 : 21;
+
+      if (y <= staffTopLine - STEP_SPACING) {
+        for (let ly = staffTopLine - LINE_SPACING; ly >= y - 4; ly -= LINE_SPACING) {
+          ctx.beginPath();
+          ctx.moveTo(note.x - ledgerW, ly);
+          ctx.lineTo(note.x + ledgerW, ly);
+          ctx.stroke();
+        }
+      } else if (y >= staffBottomLine + STEP_SPACING) {
+        for (let ly = staffBottomLine + LINE_SPACING; ly <= y + 4; ly += LINE_SPACING) {
+          ctx.beginPath();
+          ctx.moveTo(note.x - ledgerW, ly);
+          ctx.lineTo(note.x + ledgerW, ly);
+          ctx.stroke();
+        }
+      }
+
+      // Accidental sign
+      if (note.accidental) {
+        ctx.fillStyle = '#000';
+        ctx.font = `bold ${isCompact ? 36 : 54}px serif`;
+        ctx.fillText(note.accidental, note.x - (isCompact ? 34 : 51), y + (isCompact ? 12 : 18));
+      }
+    });
+
+  }, [notes, currentBeat, isCompact, keySignature, LINE_SPACING, STEP_SPACING, STAFF_PADDING, BASS_OFFSET]);
 
   return (
-    <div className="w-full bg-white rounded-xl shadow-inner overflow-hidden border border-neutral-200">
+    <div className="w-full bg-white rounded-xl shadow-inner overflow-hidden border border-neutral-200 relative" style={{ aspectRatio: isCompact ? '1000 / 400' : '1000 / 640', height: 'auto' }}>
       <canvas
-        ref={canvasRef}
+        ref={bgCanvasRef}
         width={1000}
         height={canvasHeight}
-        className="w-full h-auto block"
+        className="absolute top-0 left-0 w-full h-full"
       />
+      <AnimatePresence mode="popLayout">
+        <motion.div
+          key={measureId}
+          initial={{ opacity: 0, filter: 'blur(8px)', scale: 0.98 }}
+          animate={{ opacity: 1, filter: 'blur(0px)', scale: 1 }}
+          exit={{ opacity: 0, filter: 'blur(8px)', scale: 1.02 }}
+          transition={{ duration: 0.4, ease: 'easeInOut' }}
+          className="absolute top-0 left-0 w-full h-full"
+        >
+          <canvas
+            ref={fgCanvasRef}
+            width={1000}
+            height={canvasHeight}
+            className="w-full h-full"
+          />
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 });

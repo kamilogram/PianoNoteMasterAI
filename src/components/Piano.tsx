@@ -12,8 +12,8 @@ const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
 export const Piano: React.FC<PianoProps> = React.memo(({ onNotePress, activeNotes, ledgerLines, isCompact = false }) => {
   // Determine octave range based on ledger lines
-  // N=1: 2-5, N=2: 2-6, N=3+: 1-6
-  const startOctave = ledgerLines >= 3 ? 1 : 2;
+  // N=1: 2-5, N=2+: 1-6 (starting at octave 1 ensures B1 is available for flat keys like Gb/Eb is)
+  const startOctave = ledgerLines >= 2 ? 1 : 2;
   const endOctave = (ledgerLines === 1) ? 5 : 6;
   
   const octaves = [];
@@ -57,6 +57,9 @@ export const Piano: React.FC<PianoProps> = React.memo(({ onNotePress, activeNote
             className={`border border-neutral-300 rounded-b-lg transition-colors flex-shrink-0 relative ${getKeyColor(key.name, false)}`}
             style={{ width: `${keyWidth}px`, height: `${keyHeight}px` }}
           >
+            {key.name === 'C4' && (
+              <div className="absolute top-2 left-1/2 -translate-x-1/2 w-2 h-2 bg-neutral-300 rounded-sm" />
+            )}
             {!isCompact && (
               <span className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] font-bold text-neutral-400">
                 {key.octave}
