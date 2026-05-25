@@ -455,7 +455,7 @@ export default function App() {
 
           {/* Max Notes Per Spawn Selector */}
           <div className={`flex items-center gap-2 bg-white px-3 py-1 rounded-full shadow-sm border border-neutral-200`}>
-            {!isCompact && <span className="text-[10px] font-bold text-neutral-400 uppercase">Notes:</span>}
+            {!isCompact && <span className="text-[10px] font-bold text-neutral-400 uppercase">Max notes:</span>}
             <select 
               value={maxNotesPerSpawn}
               onChange={(e) => setMaxNotesPerSpawn(parseInt(e.target.value))}
