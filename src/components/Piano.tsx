@@ -6,11 +6,12 @@ interface PianoProps {
   activeNotes: Map<string, 'hit' | 'miss' | 'default'>;
   ledgerLines: number;
   isCompact?: boolean;
+  isDarkMode?: boolean;
 }
 
 const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
-export const Piano: React.FC<PianoProps> = React.memo(({ onNotePress, activeNotes, ledgerLines, isCompact = false }) => {
+export const Piano: React.FC<PianoProps> = React.memo(({ onNotePress, activeNotes, ledgerLines, isCompact = false, isDarkMode = false }) => {
   // Determine octave range based on ledger lines
   // N=1: 2-5, N=2+: 1-6 (starting at octave 1 ensures B1 is available for flat keys like Gb/Eb is)
   const startOctave = ledgerLines >= 2 ? 1 : 2;
@@ -34,7 +35,13 @@ export const Piano: React.FC<PianoProps> = React.memo(({ onNotePress, activeNote
 
   const getKeyColor = (keyName: string, isBlack: boolean) => {
     const status = activeNotes.get(keyName);
-    if (!status) return isBlack ? 'bg-neutral-800 hover:bg-neutral-700' : 'bg-white hover:bg-neutral-100';
+    if (!status) {
+      if (isBlack) {
+        return isDarkMode ? 'bg-neutral-950 hover:bg-neutral-900' : 'bg-neutral-800 hover:bg-neutral-700';
+      } else {
+        return isDarkMode ? 'bg-zinc-200 hover:bg-zinc-300' : 'bg-white hover:bg-neutral-100';
+      }
+    }
     
     if (status === 'hit') return 'bg-green-500';
     if (status === 'miss') return 'bg-red-500';
@@ -46,7 +53,7 @@ export const Piano: React.FC<PianoProps> = React.memo(({ onNotePress, activeNote
   const containerHeight = isCompact ? 150 : 192; // 48*4
 
   return (
-    <div className={`w-full bg-neutral-900 ${isCompact ? 'p-1' : 'p-4'} rounded-2xl shadow-inner overflow-x-auto custom-scrollbar`}>
+    <div className={`w-full transition-colors duration-500 ${isDarkMode ? 'bg-zinc-950 border border-zinc-850' : 'bg-neutral-900'} ${isCompact ? 'p-1' : 'p-4'} rounded-2xl shadow-inner overflow-x-auto custom-scrollbar`}>
       <div className={`relative flex min-w-max mx-auto`} style={{ height: `${containerHeight}px` }}>
         {/* White Keys */}
         {WHITE_KEYS.map((key) => (
@@ -54,14 +61,14 @@ export const Piano: React.FC<PianoProps> = React.memo(({ onNotePress, activeNote
             key={key.name}
             whileTap={{ scale: 0.98 }}
             onClick={() => onNotePress(key.name)}
-            className={`border border-neutral-300 rounded-b-lg transition-colors flex-shrink-0 relative ${getKeyColor(key.name, false)}`}
+            className={`border rounded-b-lg transition-colors flex-shrink-0 relative ${isDarkMode ? 'border-zinc-400' : 'border-neutral-300'} ${getKeyColor(key.name, false)}`}
             style={{ width: `${keyWidth}px`, height: `${keyHeight}px` }}
           >
             {key.name === 'C4' && (
-              <div className="absolute top-2 left-1/2 -translate-x-1/2 w-2 h-2 bg-neutral-300 rounded-sm" />
+              <div className={`absolute top-2 left-1/2 -translate-x-1/2 w-2 h-2 rounded-sm ${isDarkMode ? 'bg-zinc-400' : 'bg-neutral-300'}`} />
             )}
             {!isCompact && (
-              <span className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] font-bold text-neutral-400">
+              <span className={`absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] font-bold ${isDarkMode ? 'text-zinc-500' : 'text-neutral-400'}`}>
                 {key.octave}
               </span>
             )}

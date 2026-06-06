@@ -19,6 +19,7 @@ interface StaffProps {
   keySignature?: string;
   isCompact?: boolean;
   measureId?: number;
+  isDarkMode?: boolean;
 }
 
 // Scaling constants
@@ -82,7 +83,7 @@ const getBassKeyPos = (pitch: string): string => {
   return `${note}${octave - 2}`;
 };
 
-export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0, keySignature = 'C Major', isCompact = false, measureId = 0 }) => {
+export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0, keySignature = 'C Major', isCompact = false, measureId = 0, isDarkMode = false }) => {
   const bgCanvasRef = useRef<HTMLCanvasElement>(null);
   const fgCanvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -94,6 +95,13 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
   const SIG_STEP_X = isCompact ? COMPACT_SIG_STEP_X : DEFAULT_SIG_STEP_X;
   const BASS_OFFSET = isCompact ? COMPACT_BASS_OFFSET : DEFAULT_BASS_OFFSET;
   const canvasHeight = isCompact ? 400 : 640;
+
+  // Colors based on dark mode
+  const lineStrokeColor = isDarkMode ? 'rgba(255, 255, 255, 0.25)' : '#333333';
+  const primaryFillColor = isDarkMode ? '#f4f4f5' : '#000000'; // zinc-100 vs black
+  const secondaryTextColor = isDarkMode ? '#a1a1aa' : '#999999'; // zinc-400 vs grey-400
+  const barlineStrokeColor = isDarkMode ? 'rgba(255, 255, 255, 0.4)' : '#000000';
+  const activeHighlightColor = isDarkMode ? 'rgba(251, 191, 36, 0.18)' : '#FEF08A'; // amber light glow vs yellow
 
   // Background Canvas Effect (Lines, Clefs, Key Signature)
   useEffect(() => {
@@ -112,7 +120,7 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
       const centerX = (minX + maxX) / 2;
       const rectWidth = isCompact ? 80 : 120;
       
-      ctx.fillStyle = '#FEF08A'; // light yellow highlight
+      ctx.fillStyle = activeHighlightColor; // theme active selector
       
       const staffTop = STAFF_PADDING - 20;
       const staffBottom = BASS_OFFSET + STAFF_PADDING + 4 * LINE_SPACING + 20;
@@ -122,7 +130,7 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
     }
     
     const drawClefStaff = (yOffset: number, label: string, clefSymbol: string, clefType: 'treble' | 'bass') => {
-      ctx.strokeStyle = '#333';
+      ctx.strokeStyle = lineStrokeColor;
       ctx.lineWidth = 1.8;
       
       // Draw 5 lines
@@ -135,7 +143,7 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
       }
 
       // Clef Symbol
-      ctx.fillStyle = '#000';
+      ctx.fillStyle = primaryFillColor;
       ctx.font = `${isCompact ? 60 : 90}px serif`;
       ctx.fillText(clefSymbol, CLEF_X, yOffset + STAFF_PADDING + 3.5 * LINE_SPACING);
 
@@ -159,7 +167,7 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
       });
 
       // Label
-      ctx.fillStyle = '#999';
+      ctx.fillStyle = secondaryTextColor;
       ctx.font = `italic ${isCompact ? 10 : 12}px Georgia, serif`;
       ctx.fillText(label, 15, yOffset + STAFF_PADDING - (isCompact ? 20 : 30));
     };
@@ -176,7 +184,7 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
     ctx.beginPath();
     ctx.moveTo(980, staffTop);
     ctx.lineTo(980, staffBottom);
-    ctx.strokeStyle = '#000';
+    ctx.strokeStyle = barlineStrokeColor;
     ctx.lineWidth = isCompact ? 1.5 : 2;
     ctx.stroke();
 
@@ -185,7 +193,7 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
     ctx.moveTo(10, staffTop);
     ctx.lineTo(10, staffBottom);
     ctx.stroke();
-  }, [notes, currentBeat, keySignature, isCompact, LINE_SPACING, STAFF_PADDING, CLEF_X, SIG_START_X, SIG_STEP_X, BASS_OFFSET]);
+  }, [notes, currentBeat, keySignature, isCompact, LINE_SPACING, STAFF_PADDING, CLEF_X, SIG_START_X, SIG_STEP_X, BASS_OFFSET, isDarkMode]);
 
   // Foreground Canvas Effect (Notes, Accidentals, Ledger Lines)
   useEffect(() => {
@@ -196,12 +204,15 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    const primaryNoteColor = isDarkMode ? '#f4f4f5' : '#000000';
+    const ledgerLineColor = isDarkMode ? 'rgba(255, 255, 255, 0.4)' : '#000000';
+
     notes.forEach(note => {
       const yBase = note.clef === 'treble' ? 0 : BASS_OFFSET;
       const y = yBase + getNoteY(note.displayPitch, note.clef, STAFF_PADDING, LINE_SPACING);
       
-      ctx.fillStyle = '#000';
-      ctx.strokeStyle = '#000';
+      ctx.fillStyle = primaryNoteColor;
+      ctx.strokeStyle = primaryNoteColor;
       
       ctx.lineWidth = 2;
       
@@ -223,7 +234,7 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
       ctx.stroke();
 
       // Ledger lines
-      ctx.strokeStyle = '#000';
+      ctx.strokeStyle = ledgerLineColor;
       const staffTopLine = yBase + STAFF_PADDING;
       const staffBottomLine = yBase + STAFF_PADDING + 4 * LINE_SPACING;
       
@@ -247,16 +258,16 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
 
       // Accidental sign
       if (note.accidental) {
-        ctx.fillStyle = '#000';
+        ctx.fillStyle = primaryNoteColor;
         ctx.font = `bold ${isCompact ? 36 : 54}px serif`;
         ctx.fillText(note.accidental, note.x - (isCompact ? 34 : 51), y + (isCompact ? 12 : 18));
       }
     });
 
-  }, [notes, currentBeat, isCompact, keySignature, LINE_SPACING, STEP_SPACING, STAFF_PADDING, BASS_OFFSET]);
+  }, [notes, currentBeat, isCompact, keySignature, LINE_SPACING, STEP_SPACING, STAFF_PADDING, BASS_OFFSET, isDarkMode]);
 
   return (
-    <div className="w-full bg-white rounded-xl shadow-inner overflow-hidden border border-neutral-200 relative" style={{ aspectRatio: isCompact ? '1000 / 400' : '1000 / 640', height: 'auto' }}>
+    <div className={`w-full transition-colors duration-500 rounded-xl shadow-inner overflow-hidden border relative ${isDarkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-neutral-200'}`} style={{ aspectRatio: isCompact ? '1000 / 400' : '1000 / 640', height: 'auto' }}>
       <canvas
         ref={bgCanvasRef}
         width={1000}

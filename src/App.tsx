@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Piano } from './components/Piano';
 import { Staff } from './components/Staff';
 import { audioService } from './services/audioService';
-import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock } from 'lucide-react';
+import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock, Sun, Moon } from 'lucide-react';
 
 interface Note {
   id: number;
@@ -115,6 +115,22 @@ export default function App() {
   const [keyChangeAlert, setKeyChangeAlert] = useState<{ id: number; keyName: string } | null>(null);
   const [startTime, setStartTime] = useState<string | null>(null);
   const [isCompact, setIsCompact] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    const saved = localStorage.getItem('piano_note_master_dark_mode');
+    if (saved !== null) {
+      return saved === 'true';
+    }
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('piano_note_master_dark_mode', String(isDarkMode));
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDarkMode]);
 
   useEffect(() => {
     if (keyChangeAlert) {
@@ -216,10 +232,28 @@ export default function App() {
           return true;
         };
 
-        do {
-          basePitch = pool[Math.floor(Math.random() * pool.length)];
-          attempts++;
-        } while (!checkValid(basePitch) && attempts < 50);
+        // If a previously generated note in this measure got an accidental, increase the probability of repeating it
+        const recurringNotesWithAccidentals = newNotes.filter(
+          n => n.clef === (isTreble ? 'treble' : 'bass') && n.accidental !== null && n.accidental !== undefined
+        );
+        let chosenFromRecurring = false;
+        
+        // 60% chance to repeat a note with an accidental from previously generated beats in this measure
+        if (recurringNotesWithAccidentals.length > 0 && Math.random() < 0.6) {
+          const candidatePitches = Array.from(new Set(recurringNotesWithAccidentals.map(n => n.displayPitch)));
+          const validCandidates = candidatePitches.filter(p => checkValid(p));
+          if (validCandidates.length > 0) {
+            basePitch = validCandidates[Math.floor(Math.random() * validCandidates.length)];
+            chosenFromRecurring = true;
+          }
+        }
+
+        if (!chosenFromRecurring) {
+          do {
+            basePitch = pool[Math.floor(Math.random() * pool.length)];
+            attempts++;
+          } while (!checkValid(basePitch) && attempts < 50);
+        }
 
         const pNoteInit = basePitch.slice(0, -1);
         const pOctaveInit = parseInt(basePitch.slice(-1));
@@ -254,18 +288,26 @@ export default function App() {
         
         let targetMod = sigState;
 
-        if (currentKey !== 'C Major' && sigState !== 'natural' && Math.random() > 0.8) {
-          targetMod = 'natural';
-        } else if (useAccidentals && Math.random() > 0.7) {
-          const canHaveSharp = ['C', 'D', 'F', 'G', 'A'].includes(noteName);
-          const canHaveFlat = ['D', 'E', 'G', 'A', 'B'].includes(noteName);
-          
-          if (Math.random() > 0.5 && canHaveSharp) {
-            targetMod = 'sharp';
-          } else if (canHaveFlat) {
-            targetMod = 'flat';
-          } else if (canHaveSharp || canHaveFlat) {
+        const hasMeasureAccidental = measureAccidentals.has(basePitch);
+        const existingMeasureMod = measureAccidentals.get(basePitch);
+
+        if (hasMeasureAccidental && existingMeasureMod && Math.random() < 0.90) {
+          // Keep the existing modification 90% of the time, so cancellations/changes are rare
+          targetMod = existingMeasureMod;
+        } else {
+          if (currentKey !== 'C Major' && sigState !== 'natural' && Math.random() > 0.8) {
             targetMod = 'natural';
+          } else if (useAccidentals && Math.random() > 0.7) {
+            const canHaveSharp = ['C', 'D', 'F', 'G', 'A'].includes(noteName);
+            const canHaveFlat = ['D', 'E', 'G', 'A', 'B'].includes(noteName);
+            
+            if (Math.random() > 0.5 && canHaveSharp) {
+              targetMod = 'sharp';
+            } else if (canHaveFlat) {
+              targetMod = 'flat';
+            } else if (canHaveSharp || canHaveFlat) {
+              targetMod = 'natural';
+            }
           }
         }
 
@@ -407,7 +449,7 @@ export default function App() {
   };
 
   return (
-    <div className={`min-h-screen bg-neutral-50 text-neutral-900 font-sans flex flex-col items-center overflow-hidden transition-all duration-500 ${isCompact ? 'p-1' : 'p-2 md:p-4'}`}>
+    <div className={`min-h-screen font-sans flex flex-col items-center overflow-hidden transition-all duration-500 ${isDarkMode ? 'bg-zinc-950 text-zinc-100' : 'bg-neutral-50 text-neutral-900'} ${isCompact ? 'p-1' : 'p-2 md:p-4'}`}>
       <header className={`w-full max-w-5xl md:landscape:max-w-none xl:max-w-5xl flex flex-col sm:flex-row justify-between items-center gap-2 md:gap-4 ${isCompact ? 'mb-1' : 'mb-4'}`}>
         <div className="flex items-center gap-2">
           <div className="bg-blue-600 p-1.5 rounded-lg text-white">
@@ -421,11 +463,13 @@ export default function App() {
           <select 
             value={selectedKeySignature}
             onChange={(e) => handleKeySignatureChange(e.target.value as any)}
-            className={`${isCompact ? 'text-[10px]' : 'text-xs md:text-sm'} bg-white border border-neutral-200 rounded-full px-3 py-1 shadow-sm outline-none focus:ring-2 focus:ring-blue-500`}
+            className={`${isCompact ? 'text-[10px]' : 'text-xs md:text-sm'} rounded-full px-3 py-1 shadow-sm outline-none focus:ring-2 focus:ring-blue-500 border transition-all ${
+              isDarkMode ? 'bg-zinc-900 border-zinc-805 text-zinc-100' : 'bg-white border-neutral-200 text-neutral-900'
+            }`}
           >
-            <option value="Random">Losowo (co 4 takty)</option>
+            <option value="Random" className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>Losowo (co 4 takty)</option>
             {Object.keys(KEY_SIGNATURES).map(k => (
-              <option key={k} value={k}>{k}</option>
+              <option key={k} value={k} className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>{k}</option>
             ))}
           </select>
 
@@ -433,41 +477,49 @@ export default function App() {
           <button 
             onClick={() => setUseAccidentals(!useAccidentals)}
             className={`${isCompact ? 'text-[10px] px-2' : 'text-xs md:text-sm px-4'} py-1 rounded-full border transition-all ${
-              useAccidentals ? 'bg-purple-100 border-purple-300 text-purple-700' : 'bg-white border-neutral-200 text-neutral-500'
+              useAccidentals 
+                ? (isDarkMode ? 'bg-purple-950/40 border-purple-800/80 text-purple-300' : 'bg-purple-100 border-purple-300 text-purple-700') 
+                : (isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200' : 'bg-white border-neutral-200 text-neutral-500')
             }`}
           >
             {isCompact ? 'Acc' : 'Accidentals'}: {useAccidentals ? 'ON' : 'OFF'}
           </button>
 
           {/* Ledger Lines Selector */}
-          <div className={`flex items-center gap-2 bg-white px-3 py-1 rounded-full shadow-sm border border-neutral-200`}>
-            {!isCompact && <span className="text-[10px] font-bold text-neutral-400 uppercase">Lines:</span>}
+          <div className={`flex items-center gap-2 px-3 py-1 rounded-full shadow-sm border transition-all ${
+            isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-200' : 'bg-white border-neutral-200 text-neutral-900'
+          }`}>
+            {!isCompact && <span className={`text-[10px] font-bold uppercase ${isDarkMode ? 'text-zinc-500' : 'text-neutral-400'}`}>Lines:</span>}
             <select 
               value={ledgerLines}
               onChange={(e) => setLedgerLines(parseInt(e.target.value))}
-              className={`${isCompact ? 'text-[10px]' : 'text-xs'} font-bold outline-none bg-transparent`}
+              className={`${isCompact ? 'text-[10px]' : 'text-xs'} font-bold outline-none bg-transparent ${isDarkMode ? 'text-zinc-200 [&>option]:bg-zinc-900 [&>option]:text-zinc-205' : 'text-neutral-900'}`}
             >
               {[1, 2, 3, 4, 5].map(v => (
-                <option key={v} value={v}>{isCompact ? `L${v}` : v}</option>
+                <option key={v} value={v} className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>{isCompact ? `L${v}` : v}</option>
               ))}
             </select>
           </div>
 
           {/* Max Notes Per Spawn Selector */}
-          <div className={`flex items-center gap-2 bg-white px-3 py-1 rounded-full shadow-sm border border-neutral-200`}>
-            {!isCompact && <span className="text-[10px] font-bold text-neutral-400 uppercase">Max notes:</span>}
+          <div className={`flex items-center gap-2 px-3 py-1 rounded-full shadow-sm border transition-all ${
+            isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-200' : 'bg-white border-neutral-200 text-neutral-900'
+          }`}>
+            {!isCompact && <span className={`text-[10px] font-bold uppercase ${isDarkMode ? 'text-zinc-500' : 'text-neutral-400'}`}>Max notes:</span>}
             <select 
               value={maxNotesPerSpawn}
               onChange={(e) => setMaxNotesPerSpawn(parseInt(e.target.value))}
-              className={`${isCompact ? 'text-[10px]' : 'text-xs'} font-bold outline-none bg-transparent`}
+              className={`${isCompact ? 'text-[10px]' : 'text-xs'} font-bold outline-none bg-transparent ${isDarkMode ? 'text-zinc-200 [&>option]:bg-zinc-900 [&>option]:text-zinc-205' : 'text-neutral-900'}`}
             >
-              <option value={1}>{isCompact ? 'N1' : '1'}</option>
-              <option value={2}>{isCompact ? 'N2' : '2'}</option>
-              <option value={3}>{isCompact ? 'N3' : '3'}</option>
+              <option value={1} className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>{isCompact ? 'N1' : '1'}</option>
+              <option value={2} className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>{isCompact ? 'N2' : '2'}</option>
+              <option value={3} className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>{isCompact ? 'N3' : '3'}</option>
             </select>
           </div>
 
-          <div className="flex items-center gap-2 bg-white px-3 py-1 rounded-full shadow-sm border border-neutral-200">
+          <div className={`flex items-center gap-2 px-3 py-1 rounded-full shadow-sm border transition-all ${
+            isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-200' : 'bg-white border-neutral-200 text-neutral-900'
+          }`}>
             <Trophy size={isCompact ? 12 : 16} className="text-yellow-500" />
             <span className={`font-mono font-bold ${isCompact ? 'text-xs' : 'text-sm'}`}>{score}</span>
           </div>
@@ -475,7 +527,7 @@ export default function App() {
           <button 
             onClick={() => {
               if (!isPlaying && !startTime) {
-                setStartTime(new Date().toLocaleTimeString());
+                setStartTime(new Date().toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
                 measuresPlayedRef.current = 0;
                 generateMeasure();
               }
@@ -483,7 +535,7 @@ export default function App() {
             }}
             className={`flex items-center gap-2 px-4 py-1.5 rounded-full font-semibold transition-all shadow-md ${isCompact ? 'text-[10px] px-2 py-1' : 'text-sm'} ${
               isPlaying 
-                ? 'bg-neutral-200 text-neutral-700 hover:bg-neutral-300' 
+                ? (isDarkMode ? 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700' : 'bg-neutral-200 text-neutral-700 hover:bg-neutral-300') 
                 : 'bg-blue-600 text-white hover:bg-blue-700'
             }`}
           >
@@ -492,8 +544,16 @@ export default function App() {
           </button>
 
           <button 
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            className={`p-1.5 rounded-full transition-colors ${isDarkMode ? 'text-yellow-400 hover:text-yellow-300 bg-zinc-800/80 hover:bg-zinc-700' : 'text-neutral-500 hover:text-neutral-900 bg-white hover:bg-neutral-100/80'} border border-neutral-200 shadow-sm`}
+            title={isDarkMode ? "Włącz tryb jasny" : "Włącz tryb ciemny"}
+          >
+            {isDarkMode ? <Sun size={isCompact ? 14 : 16} /> : <Moon size={isCompact ? 14 : 16} />}
+          </button>
+
+          <button 
             onClick={resetGame}
-            className={`p-1.5 text-neutral-400 hover:text-neutral-900 transition-colors ${isCompact ? 'hidden' : ''}`}
+            className={`p-1.5 transition-colors ${isCompact ? 'hidden' : ''} ${isDarkMode ? 'text-zinc-500 hover:text-zinc-200' : 'text-neutral-400 hover:text-neutral-900'}`}
             title="Reset"
           >
             <RotateCcw size={18} />
@@ -510,6 +570,7 @@ export default function App() {
             keySignature={activeKeySignature}
             isCompact={isCompact}
             measureId={measureId}
+            isDarkMode={isDarkMode}
           />
           
           {/* Feedback Overlay */}
@@ -561,12 +622,14 @@ export default function App() {
 
         {/* Piano Section */}
         <section className="w-full relative">
-          <Piano onNotePress={handlePianoPress} activeNotes={activePianoNotes} ledgerLines={ledgerLines} isCompact={isCompact} />
+          <Piano onNotePress={handlePianoPress} activeNotes={activePianoNotes} ledgerLines={ledgerLines} isCompact={isCompact} isDarkMode={isDarkMode} />
           
           {startTime && (
-            <div className="absolute -top-6 left-0 flex items-center gap-1.5 text-neutral-400 bg-neutral-50 px-2 py-0.5 rounded-md border border-neutral-100 italic transition-all animate-in fade-in slide-in-from-bottom-2 duration-700">
-              <Clock size={12} />
-              <span className="text-[10px] font-medium uppercase tracking-wider">Start learning: {startTime}</span>
+            <div className={`absolute -top-8 left-4 flex items-center gap-2 px-3 py-1.5 rounded-full border shadow-xs transition-all animate-in fade-in slide-in-from-bottom-2 duration-700 z-10 ${
+              isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-300' : 'bg-white border-neutral-200/80 text-neutral-700'
+            }`}>
+              <Clock size={14} className="text-blue-500" />
+              <span className="text-xs font-medium">Rozpoczęto o: <strong className={`font-semibold ${isDarkMode ? 'text-zinc-100' : 'text-neutral-900'}`}>{startTime}</strong></span>
             </div>
           )}
         </section>
