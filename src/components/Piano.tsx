@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
 
 interface PianoProps {
@@ -17,6 +17,24 @@ export const Piano: React.FC<PianoProps> = React.memo(({ onNotePress, activeNote
   const startOctave = ledgerLines >= 2 ? 1 : 2;
   const endOctave = (ledgerLines === 1) ? 5 : 6;
   
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      // If purely vertical scrolling, translate to horizontal scroll
+      if (e.deltaY !== 0 && Math.abs(e.deltaX) < Math.abs(e.deltaY)) {
+        e.preventDefault();
+        container.scrollLeft += e.deltaY;
+      }
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, []);
+
   const octaves = [];
   for (let i = startOctave; i <= endOctave; i++) {
     octaves.push(i);
@@ -53,7 +71,10 @@ export const Piano: React.FC<PianoProps> = React.memo(({ onNotePress, activeNote
   const containerHeight = isCompact ? 150 : 192; // 48*4
 
   return (
-    <div className={`w-full transition-colors duration-500 ${isDarkMode ? 'bg-zinc-950 border border-zinc-850' : 'bg-neutral-900'} ${isCompact ? 'p-1' : 'p-4'} rounded-2xl shadow-inner overflow-x-auto custom-scrollbar`}>
+    <div 
+      ref={containerRef}
+      className={`w-full transition-colors duration-500 ${isDarkMode ? 'bg-zinc-950 border border-zinc-850' : 'bg-neutral-900'} ${isCompact ? 'p-1' : 'p-4'} rounded-2xl shadow-inner overflow-x-auto custom-scrollbar`}
+    >
       <div className={`relative flex min-w-max mx-auto`} style={{ height: `${containerHeight}px` }}>
         {/* White Keys */}
         {WHITE_KEYS.map((key) => (
@@ -65,13 +86,13 @@ export const Piano: React.FC<PianoProps> = React.memo(({ onNotePress, activeNote
             style={{ width: `${keyWidth}px`, height: `${keyHeight}px` }}
           >
             {key.name === 'C4' && (
-              <div className={`absolute top-2 left-1/2 -translate-x-1/2 w-2 h-2 rounded-sm ${isDarkMode ? 'bg-zinc-400' : 'bg-neutral-300'}`} />
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 flex flex-col items-center gap-0.5 pointer-events-none" title="Środek klawiatury (C4)">
+                <div className="w-2.5 h-2.5 rounded-full bg-blue-500 ring-4 ring-blue-500/20 shadow-sm" />
+              </div>
             )}
-            {!isCompact && (
-              <span className={`absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] font-bold ${isDarkMode ? 'text-zinc-500' : 'text-neutral-400'}`}>
-                {key.octave}
-              </span>
-            )}
+            <span className={`absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] font-bold ${isDarkMode ? 'text-zinc-500' : 'text-neutral-400'}`}>
+              {key.octave}
+            </span>
           </motion.button>
         ))}
 

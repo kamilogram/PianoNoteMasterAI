@@ -20,6 +20,7 @@ interface StaffProps {
   isCompact?: boolean;
   measureId?: number;
   isDarkMode?: boolean;
+  children?: React.ReactNode;
 }
 
 // Scaling constants
@@ -83,7 +84,7 @@ const getBassKeyPos = (pitch: string): string => {
   return `${note}${octave - 2}`;
 };
 
-export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0, keySignature = 'C Major', isCompact = false, measureId = 0, isDarkMode = false }) => {
+export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0, keySignature = 'C Major', isCompact = false, measureId = 0, isDarkMode = false, children }) => {
   const bgCanvasRef = useRef<HTMLCanvasElement>(null);
   const fgCanvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -122,8 +123,8 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
       
       ctx.fillStyle = activeHighlightColor; // theme active selector
       
-      const staffTop = STAFF_PADDING - 20;
-      const staffBottom = BASS_OFFSET + STAFF_PADDING + 4 * LINE_SPACING + 20;
+      const staffTop = STAFF_PADDING - 50;
+      const staffBottom = BASS_OFFSET + STAFF_PADDING + 4 * LINE_SPACING + 50;
       const rectHeight = staffBottom - staffTop;
       
       ctx.fillRect(centerX - rectWidth / 2, staffTop, rectWidth, rectHeight);
@@ -190,8 +191,8 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
 
     // Draw initial measure barline (before clefs)
     ctx.beginPath();
-    ctx.moveTo(10, staffTop);
-    ctx.lineTo(10, staffBottom);
+    ctx.moveTo(0, staffTop);
+    ctx.lineTo(0, staffBottom);
     ctx.stroke();
   }, [notes, currentBeat, keySignature, isCompact, LINE_SPACING, STAFF_PADDING, CLEF_X, SIG_START_X, SIG_STEP_X, BASS_OFFSET, isDarkMode]);
 
@@ -208,6 +209,8 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
     const ledgerLineColor = isDarkMode ? 'rgba(255, 255, 255, 0.4)' : '#000000';
 
     notes.forEach(note => {
+      ctx.globalAlpha = note.isHit ? 0.2 : 1.0;
+
       const yBase = note.clef === 'treble' ? 0 : BASS_OFFSET;
       const y = yBase + getNoteY(note.displayPitch, note.clef, STAFF_PADDING, LINE_SPACING);
       
@@ -262,18 +265,22 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
         ctx.font = `bold ${isCompact ? 36 : 54}px serif`;
         ctx.fillText(note.accidental, note.x - (isCompact ? 34 : 51), y + (isCompact ? 12 : 18));
       }
+      
+      ctx.globalAlpha = 1.0;
     });
 
   }, [notes, currentBeat, isCompact, keySignature, LINE_SPACING, STEP_SPACING, STAFF_PADDING, BASS_OFFSET, isDarkMode]);
 
   return (
-    <div className={`w-full transition-colors duration-500 rounded-xl shadow-inner overflow-hidden border relative ${isDarkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-neutral-200'}`} style={{ aspectRatio: isCompact ? '1000 / 400' : '1000 / 640', height: 'auto' }}>
+    <div className={`w-full md:h-full flex items-center justify-center transition-colors duration-500 rounded-xl shadow-inner overflow-hidden border relative ${isCompact ? 'aspect-[1000/400]' : 'aspect-[1000/640]'} md:aspect-auto ${isDarkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-neutral-200'}`}>
       <canvas
+        key={`bg-${isDarkMode ? 'dark' : 'light'}`}
         ref={bgCanvasRef}
         width={1000}
         height={canvasHeight}
-        className="absolute top-0 left-0 w-full h-full"
+        className="absolute inset-0 w-full h-full object-contain pointer-events-none"
       />
+      {children}
       <AnimatePresence mode="popLayout">
         <motion.div
           key={measureId}
@@ -281,13 +288,14 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
           animate={{ opacity: 1, filter: 'blur(0px)', scale: 1 }}
           exit={{ opacity: 0, filter: 'blur(8px)', scale: 1.02 }}
           transition={{ duration: 0.4, ease: 'easeInOut' }}
-          className="absolute top-0 left-0 w-full h-full"
+          className="absolute inset-0 w-full h-full flex items-center justify-center pointer-events-none z-10"
         >
           <canvas
+            key={isDarkMode ? 'dark' : 'light'}
             ref={fgCanvasRef}
             width={1000}
             height={canvasHeight}
-            className="w-full h-full"
+            className="w-full h-full object-contain pointer-events-none"
           />
         </motion.div>
       </AnimatePresence>

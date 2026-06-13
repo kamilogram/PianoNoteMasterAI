@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Piano } from './components/Piano';
 import { Staff } from './components/Staff';
 import { audioService } from './services/audioService';
-import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock, Sun, Moon } from 'lucide-react';
+import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock, Sun, Moon, Volume2, VolumeX } from 'lucide-react';
 
 interface Note {
   id: number;
@@ -115,6 +115,7 @@ export default function App() {
   const [keyChangeAlert, setKeyChangeAlert] = useState<{ id: number; keyName: string } | null>(null);
   const [startTime, setStartTime] = useState<string | null>(null);
   const [isCompact, setIsCompact] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('piano_note_master_dark_mode');
     if (saved !== null) {
@@ -358,7 +359,9 @@ export default function App() {
   }, [generateMeasure, isPlaying]);
 
   const handlePianoPress = useCallback((pitch: string) => {
-    audioService.playNote(pitch);
+    if (soundEnabled) {
+      audioService.playNote(pitch);
+    }
     
     let status: 'hit' | 'miss' | 'default' = 'default';
 
@@ -433,7 +436,7 @@ export default function App() {
       next.set(pitch, status);
       return next;
     });
-  }, [isPlaying, generateMeasure]);
+  }, [isPlaying, generateMeasure, soundEnabled]);
 
   const resetGame = () => {
     setScore(0);
@@ -449,8 +452,8 @@ export default function App() {
   };
 
   return (
-    <div className={`min-h-screen font-sans flex flex-col items-center overflow-hidden transition-all duration-500 ${isDarkMode ? 'bg-zinc-950 text-zinc-100' : 'bg-neutral-50 text-neutral-900'} ${isCompact ? 'p-1' : 'p-2 md:p-4'}`}>
-      <header className={`w-full max-w-5xl md:landscape:max-w-none xl:max-w-5xl flex flex-col sm:flex-row justify-between items-center gap-2 md:gap-4 ${isCompact ? 'mb-1' : 'mb-4'}`}>
+    <div className={`min-h-[100dvh] md:h-[100dvh] font-sans flex flex-col items-center overflow-x-hidden overflow-y-auto md:overflow-hidden transition-all duration-500 w-full ${isDarkMode ? 'bg-zinc-950 text-zinc-100' : 'bg-neutral-50 text-neutral-900'} ${isCompact ? 'p-1' : 'p-2 md:p-4'}`}>
+      <header className={`w-full max-w-5xl xl:max-w-7xl shrink-0 flex flex-col sm:flex-row justify-between items-center gap-2 md:gap-4 ${isCompact ? 'mb-1' : 'mb-4'}`}>
         <div className="flex items-center gap-2">
           <div className="bg-blue-600 p-1.5 rounded-lg text-white">
             <Music size={isCompact ? 16 : 20} />
@@ -552,6 +555,14 @@ export default function App() {
           </button>
 
           <button 
+            onClick={() => setSoundEnabled(!soundEnabled)}
+            className={`p-1.5 rounded-full transition-colors ${isDarkMode ? 'bg-zinc-800/80 hover:bg-zinc-700' : 'bg-white hover:bg-neutral-100/80'} border ${soundEnabled ? (isDarkMode ? 'text-zinc-400 hover:text-zinc-200 border-zinc-700' : 'text-neutral-500 hover:text-neutral-900 border-neutral-200') : 'border-red-500/50 text-red-500 hover:text-red-600'} shadow-sm`}
+            title={soundEnabled ? "Wycisz dźwięki" : "Włącz dźwięki"}
+          >
+            {soundEnabled ? <Volume2 size={isCompact ? 14 : 16} /> : <VolumeX size={isCompact ? 14 : 16} />}
+          </button>
+
+          <button 
             onClick={resetGame}
             className={`p-1.5 transition-colors ${isCompact ? 'hidden' : ''} ${isDarkMode ? 'text-zinc-500 hover:text-zinc-200' : 'text-neutral-400 hover:text-neutral-900'}`}
             title="Reset"
@@ -561,9 +572,9 @@ export default function App() {
         </div>
       </header>
 
-      <main className={`w-full max-w-5xl md:landscape:max-w-none xl:max-w-5xl flex flex-col ${isCompact ? 'gap-1' : 'gap-4'}`}>
+      <main className={`w-full max-w-5xl xl:max-w-7xl flex flex-col flex-1 min-h-0 ${isCompact ? 'gap-1' : 'gap-4'}`}>
         {/* Staff Section */}
-        <section className={`relative rounded-xl transition-all duration-500 ${keyChangeAlert ? 'ring-4 ring-amber-400 shadow-[0_0_25px_rgba(245,158,11,0.45)]' : ''}`}>
+        <section className={`relative md:flex-1 md:min-h-0 rounded-xl transition-all duration-500 w-full ${keyChangeAlert ? 'ring-4 ring-amber-400 shadow-[0_0_25px_rgba(245,158,11,0.45)]' : ''}`}>
           <Staff 
             notes={notes}
             currentBeat={currentBeat}
@@ -571,24 +582,24 @@ export default function App() {
             isCompact={isCompact}
             measureId={measureId}
             isDarkMode={isDarkMode}
-          />
-          
-          {/* Feedback Overlay */}
-          <AnimatePresence>
-            {feedback && (
-              <motion.div
-                key={feedback.id}
-                initial={{ opacity: 0, y: 10, scale: 0.8 }}
-                animate={{ opacity: 1, y: -10, scale: 1.1 }}
-                exit={{ opacity: 0 }}
-                className={`absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 font-bold text-xl z-20 flex flex-col items-center ${
-                  feedback.type === 'hit' ? 'text-green-500' : 'text-red-500'
-                }`}
-              >
-                <span>{feedback.message}</span>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          >
+            {/* Feedback Overlay */}
+            <AnimatePresence>
+              {feedback && (
+                <motion.div
+                  key={feedback.id}
+                  initial={{ opacity: 0, y: 10, scale: 0.8 }}
+                  animate={{ opacity: 1, y: -10, scale: 1.1 }}
+                  exit={{ opacity: 0 }}
+                  className={`absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 font-bold text-xl md:text-2xl z-0 flex flex-col items-center pointer-events-none drop-shadow-md ${
+                    feedback.type === 'hit' ? 'text-green-500' : 'text-red-500'
+                  }`}
+                >
+                  <span>{feedback.message}</span>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </Staff>
 
           {/* Key Signature Change Announcement Overlay */}
           <AnimatePresence>
@@ -621,7 +632,7 @@ export default function App() {
         </section>
 
         {/* Piano Section */}
-        <section className="w-full relative">
+        <section className="w-full relative shrink-0">
           <Piano onNotePress={handlePianoPress} activeNotes={activePianoNotes} ledgerLines={ledgerLines} isCompact={isCompact} isDarkMode={isDarkMode} />
           
           {startTime && (
