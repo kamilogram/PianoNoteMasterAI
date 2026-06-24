@@ -97,6 +97,42 @@ const generateRange = (start: string, end: string) => {
   return res;
 };
 
+const isAccidentalAllowed = (noteName: string, mod: 'sharp' | 'flat' | 'natural', keyName: string): boolean => {
+  if (keyName === 'C Major') return true;
+  const sig = KEY_SIGNATURES[keyName as keyof typeof KEY_SIGNATURES];
+  if (!sig) return true;
+
+  const baseSemitones: Record<string, number> = { 'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11 };
+  
+  const getScalePitchClass = (name: string): number => {
+    let semitone = baseSemitones[name];
+    if (sig.sharps.includes(name)) {
+      semitone = (semitone + 1) % 12;
+    } else if (sig.flats.includes(name)) {
+      semitone = (semitone - 1 + 12) % 12;
+    }
+    return semitone;
+  };
+
+  let candidateSemitone = baseSemitones[noteName];
+  if (mod === 'sharp') {
+    candidateSemitone = (candidateSemitone + 1) % 12;
+  } else if (mod === 'flat') {
+    candidateSemitone = (candidateSemitone - 1 + 12) % 12;
+  }
+
+  // Find if any other diatonic note in the key's scale maps to this semitone class
+  for (const name of NOTE_NAMES) {
+    if (name !== noteName) {
+      if (getScalePitchClass(name) === candidateSemitone) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+};
+
 export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [ledgerLines, setLedgerLines] = useState(2);
@@ -114,6 +150,8 @@ export default function App() {
   const [feedback, setFeedback] = useState<{ type: 'hit' | 'miss', id: number, message?: string } | null>(null);
   const [keyChangeAlert, setKeyChangeAlert] = useState<{ id: number; keyName: string } | null>(null);
   const [startTime, setStartTime] = useState<string | null>(null);
+  const [startDateTime, setStartDateTime] = useState<Date | null>(null);
+  const [elapsedMinutes, setElapsedMinutes] = useState<number>(0);
   const [isCompact, setIsCompact] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
@@ -123,6 +161,23 @@ export default function App() {
     }
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
+
+  useEffect(() => {
+    if (!startDateTime) {
+      setElapsedMinutes(0);
+      return;
+    }
+
+    const updateElapsed = () => {
+      const mins = Math.floor((Date.now() - startDateTime.getTime()) / 60000);
+      setElapsedMinutes(mins);
+    };
+
+    updateElapsed();
+    const interval = setInterval(updateElapsed, 1000);
+
+    return () => clearInterval(interval);
+  }, [startDateTime]);
 
   useEffect(() => {
     localStorage.setItem('piano_note_master_dark_mode', String(isDarkMode));
@@ -203,7 +258,16 @@ export default function App() {
       const noteNames = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 
       for (let i = 0; i < count; i++) {
-        const isTreble = Math.random() > 0.5;
+        let isTreble = Math.random() > 0.5;
+        if (count === 5) {
+          const trebleCount = usedNotesInBeat.filter(n => n.isTreble).length;
+          const bassCount = usedNotesInBeat.filter(n => !n.isTreble).length;
+          if (trebleCount === 4) {
+            isTreble = false;
+          } else if (bassCount === 4) {
+            isTreble = true;
+          }
+        }
         const pool = isTreble ? getNotePool('treble', ledgerLines) : getNotePool('bass', ledgerLines);
         
         let basePitch: string = pool[0];
@@ -298,17 +362,28 @@ export default function App() {
           targetMod = existingMeasureMod;
         } else {
           if (currentKey !== 'C Major' && sigState !== 'natural' && Math.random() > 0.8) {
-            targetMod = 'natural';
+            if (isAccidentalAllowed(noteName, 'natural', currentKey)) {
+              targetMod = 'natural';
+            }
           } else if (useAccidentals && Math.random() > 0.7) {
             const canHaveSharp = ['C', 'D', 'F', 'G', 'A'].includes(noteName);
             const canHaveFlat = ['D', 'E', 'G', 'A', 'B'].includes(noteName);
             
-            if (Math.random() > 0.5 && canHaveSharp) {
-              targetMod = 'sharp';
-            } else if (canHaveFlat) {
-              targetMod = 'flat';
-            } else if (canHaveSharp || canHaveFlat) {
-              targetMod = 'natural';
+            const validOptions: ('sharp' | 'flat' | 'natural')[] = [];
+            if (canHaveSharp && isAccidentalAllowed(noteName, 'sharp', currentKey)) {
+              validOptions.push('sharp');
+            }
+            if (canHaveFlat && isAccidentalAllowed(noteName, 'flat', currentKey)) {
+              validOptions.push('flat');
+            }
+            if (isAccidentalAllowed(noteName, 'natural', currentKey)) {
+              validOptions.push('natural');
+            }
+
+            if (validOptions.length > 0) {
+              targetMod = validOptions[Math.floor(Math.random() * validOptions.length)];
+            } else {
+              targetMod = sigState;
             }
           }
         }
@@ -457,6 +532,8 @@ export default function App() {
     currentBeatRef.current = 0;
     setIsPlaying(false);
     setStartTime(null);
+    setStartDateTime(null);
+    setElapsedMinutes(0);
     setActivePianoNotes(new Map());
     lastPressBeatRef.current = 0;
     pressedKeysInBeatRef.current.clear();
@@ -526,9 +603,9 @@ export default function App() {
               onChange={(e) => setMaxNotesPerSpawn(parseInt(e.target.value))}
               className={`${isCompact ? 'text-[10px]' : 'text-xs'} font-bold outline-none bg-transparent ${isDarkMode ? 'text-zinc-200 [&>option]:bg-zinc-900 [&>option]:text-zinc-205' : 'text-neutral-900'}`}
             >
-              <option value={1} className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>{isCompact ? 'N1' : '1'}</option>
-              <option value={2} className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>{isCompact ? 'N2' : '2'}</option>
-              <option value={3} className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>{isCompact ? 'N3' : '3'}</option>
+              {[1, 2, 3, 4, 5].map(v => (
+                <option key={v} value={v} className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>{isCompact ? `N${v}` : v}</option>
+              ))}
             </select>
           </div>
 
@@ -542,7 +619,10 @@ export default function App() {
           <button 
             onClick={() => {
               if (!isPlaying && !startTime) {
-                setStartTime(new Date().toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+                const now = new Date();
+                setStartTime(now.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+                setStartDateTime(now);
+                setElapsedMinutes(0);
                 measuresPlayedRef.current = 0;
                 generateMeasure();
               }
@@ -652,7 +732,7 @@ export default function App() {
               isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-300' : 'bg-white border-neutral-200/80 text-neutral-700'
             }`}>
               <Clock size={14} className="text-blue-500" />
-              <span className="text-xs font-medium">Rozpoczęto o: <strong className={`font-semibold ${isDarkMode ? 'text-zinc-100' : 'text-neutral-900'}`}>{startTime}</strong></span>
+              <span className="text-xs font-medium">Rozpoczęto o: <strong className={`font-semibold ${isDarkMode ? 'text-zinc-100' : 'text-neutral-900'}`}>{startTime} ({elapsedMinutes} min)</strong></span>
             </div>
           )}
         </section>
