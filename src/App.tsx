@@ -200,7 +200,6 @@ export default function App() {
   const notesRef = useRef<Note[]>([]);
   const currentBeatRef = useRef<number>(0);
   const lastPressBeatRef = useRef<number>(0);
-  const pressedKeysInBeatRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const mql = window.matchMedia('(min-width: 768px) and (orientation: landscape)');
@@ -425,7 +424,6 @@ export default function App() {
     setMeasureId(id => id + 1);
     setActivePianoNotes(new Map());
     lastPressBeatRef.current = 0;
-    pressedKeysInBeatRef.current.clear();
   }, [useAccidentals, selectedKeySignature, maxNotesPerSpawn, ledgerLines]);
 
   // Regenerate on settings change
@@ -454,23 +452,22 @@ export default function App() {
 
     const currentNotes = notesRef.current;
     let beat = currentBeatRef.current;
-
-    if (lastPressBeatRef.current !== beat) {
-      pressedKeysInBeatRef.current.clear();
-    }
-
-    if (pressedKeysInBeatRef.current.has(pitch)) {
-      return;
-    }
-    pressedKeysInBeatRef.current.add(pitch);
     
-    const unplayedInBeat = currentNotes.filter(n => n.beatIndex === beat && !n.isHit);
+    const notesInBeat = currentNotes.filter(n => n.beatIndex === beat);
+    const unplayedInBeat = notesInBeat.filter(n => !n.isHit);
     
     if (unplayedInBeat.length === 0) {
       return; // Waiting for new measure
     }
 
     const matchingNote = unplayedInBeat.find(n => n.actualPitch === pitch);
+
+    // If the pitch is part of the current beat but has already been fully played/hit,
+    // ignore the press instead of counting it as a miss (prevents double-tap penalties)
+    const isAlreadyHitInBeat = notesInBeat.some(n => n.actualPitch === pitch && n.isHit);
+    if (!matchingNote && isAlreadyHitInBeat) {
+      return;
+    }
 
     let isLastOfBeat = false;
 
@@ -536,7 +533,6 @@ export default function App() {
     setElapsedMinutes(0);
     setActivePianoNotes(new Map());
     lastPressBeatRef.current = 0;
-    pressedKeysInBeatRef.current.clear();
     measuresPlayedRef.current = 0;
   };
 
