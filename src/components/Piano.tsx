@@ -66,7 +66,6 @@ export const Piano: React.FC<PianoProps> = React.memo(({ onNotePress, activeNote
     return 'bg-blue-400'; // default/preview mode
   };
 
-  const keyWidth = isCompact ? 32 : 40;
   const keyHeight = isCompact ? 140 : 176; // 44*4
   const containerHeight = isCompact ? 150 : 192; // 48*4
 
@@ -75,50 +74,52 @@ export const Piano: React.FC<PianoProps> = React.memo(({ onNotePress, activeNote
       ref={containerRef}
       className={`w-full transition-colors duration-500 ${isDarkMode ? 'bg-zinc-950 border border-zinc-850' : 'bg-neutral-900'} ${isCompact ? 'p-1' : 'p-4'} rounded-2xl shadow-inner overflow-x-auto custom-scrollbar`}
     >
-      <div className={`relative flex min-w-max mx-auto`} style={{ height: `${containerHeight}px` }}>
-        {/* White Keys */}
-        {WHITE_KEYS.map((key) => (
-          <motion.button
-            key={key.name}
-            whileTap={{ scale: 0.98 }}
-            onClick={() => onNotePress(key.name)}
-            className={`border rounded-b-lg transition-colors flex-shrink-0 relative ${isDarkMode ? 'border-zinc-400' : 'border-neutral-300'} ${getKeyColor(key.name, false)}`}
-            style={{ width: `${keyWidth}px`, height: `${keyHeight}px` }}
-          >
-            {key.name === 'C4' && (
-              <div className="absolute top-4 left-1/2 -translate-x-1/2 flex flex-col items-center gap-0.5 pointer-events-none" title="Środek klawiatury (C4)">
-                <div className="w-2.5 h-2.5 rounded-full bg-blue-500 ring-4 ring-blue-500/20 shadow-sm" />
-              </div>
-            )}
-            <span className={`absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] font-bold ${isDarkMode ? 'text-zinc-500' : 'text-neutral-400'}`}>
-              {key.octave}
-            </span>
-          </motion.button>
-        ))}
-
-        {/* Black Keys Overlay */}
+      <div className={`relative flex min-w-max md:min-w-full mx-auto`} style={{ height: `${containerHeight}px` }}>
         {WHITE_KEYS.map((whiteKey, index) => {
-          // Check if there should be a black key after this white key
-          // Black keys are after C, D, F, G, A
           const hasBlackKey = ['C', 'D', 'F', 'G', 'A'].includes(whiteKey.note);
-          if (!hasBlackKey || index === WHITE_KEYS.length - 1) return null;
-
-          const blackKeyName = `${whiteKey.note}#${whiteKey.octave}`;
-          const bKeyWidth = isCompact ? 22 : 28;
-          const bKeyHeight = isCompact ? 80 : 112;
+          const showBlackKey = hasBlackKey && index < WHITE_KEYS.length - 1;
+          const blackKeyName = showBlackKey ? `${whiteKey.note}#${whiteKey.octave}` : '';
 
           return (
-            <motion.button
-              key={blackKeyName}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => onNotePress(blackKeyName)}
-              className={`absolute z-10 rounded-b-md border border-black transition-colors ${getKeyColor(blackKeyName, true)}`}
-              style={{
-                width: `${bKeyWidth}px`,
-                height: `${bKeyHeight}px`,
-                left: `${(index + 1) * keyWidth - (bKeyWidth / 2)}px`,
-              }}
-            />
+            <div 
+              key={whiteKey.name}
+              className={`relative flex-shrink-0 flex justify-center ${isCompact ? 'w-[32px] min-w-[32px] md:w-auto md:flex-1' : 'w-[40px] min-w-[40px] md:w-auto md:flex-1'}`}
+            >
+              <motion.button
+                whileTap={{ scale: 0.98 }}
+                onClick={() => onNotePress(whiteKey.name)}
+                className={`w-full border rounded-b-lg transition-colors relative ${isDarkMode ? 'border-zinc-400' : 'border-neutral-300'} ${getKeyColor(whiteKey.name, false)}`}
+                style={{ height: `${keyHeight}px` }}
+              >
+                {whiteKey.name === 'C4' && (
+                  <div className="absolute top-4 left-1/2 -translate-x-1/2 flex flex-col items-center gap-0.5 pointer-events-none" title="Środek klawiatury (C4)">
+                    <div className="w-2.5 h-2.5 rounded-full bg-blue-500 ring-4 ring-blue-500/20 shadow-sm" />
+                  </div>
+                )}
+                <span className={`absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] font-bold ${isDarkMode ? 'text-zinc-500' : 'text-neutral-400'}`}>
+                  {whiteKey.octave}
+                </span>
+              </motion.button>
+
+              {showBlackKey && (
+                <div
+                  className={`absolute z-10 top-0 ${
+                    isCompact 
+                      ? 'right-[-11px] md:right-[-13px] w-[22px] md:w-[26px]' 
+                      : 'right-[-14px] md:right-[-16px] w-[28px] md:w-[32px]'
+                  }`}
+                  style={{
+                    height: `${isCompact ? 80 : 112}px`,
+                  }}
+                >
+                  <motion.button
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => onNotePress(blackKeyName)}
+                    className={`w-full h-full rounded-b-md border border-black transition-colors ${getKeyColor(blackKeyName, true)}`}
+                  />
+                </div>
+              )}
+            </div>
           );
         })}
       </div>

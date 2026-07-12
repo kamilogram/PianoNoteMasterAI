@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Piano } from './components/Piano';
 import { Staff } from './components/Staff';
 import { audioService } from './services/audioService';
-import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock, Sun, Moon, Volume2, VolumeX } from 'lucide-react';
+import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock, Sun, Moon, Volume2, VolumeX, TrendingUp, History, Calendar } from 'lucide-react';
 
 interface Note {
   id: number;
@@ -20,6 +20,14 @@ interface Note {
   isMissed?: boolean;
   isHit?: boolean;
   accidental?: '♯' | '♭' | '♮' | null;
+}
+
+interface HistoryItem {
+  id: string;
+  date: string;
+  minutes: number;
+  seconds: number;
+  score: number;
 }
 
 const KEY_SIGNATURES = {
@@ -135,12 +143,29 @@ const isAccidentalAllowed = (noteName: string, mod: 'sharp' | 'flat' | 'natural'
 
 export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
-  const [ledgerLines, setLedgerLines] = useState(2);
-  const [useAccidentals, setUseAccidentals] = useState(false);
-  const [maxNotesPerSpawn, setMaxNotesPerSpawn] = useState(1);
-  const [selectedKeySignature, setSelectedKeySignature] = useState<keyof typeof KEY_SIGNATURES | 'Random'>('C Major');
-  const [activeKeySignature, setActiveKeySignature] = useState<keyof typeof KEY_SIGNATURES>('C Major');
-  const activeKeySignatureRef = useRef<keyof typeof KEY_SIGNATURES>('C Major');
+  const [ledgerLines, setLedgerLines] = useState<number>(() => {
+    const saved = localStorage.getItem('piano_ledger_lines');
+    return saved !== null ? parseInt(saved, 10) : 2;
+  });
+  const [useAccidentals, setUseAccidentals] = useState<boolean>(() => {
+    return localStorage.getItem('piano_use_accidentals') === 'true';
+  });
+  const [maxNotesPerSpawn, setMaxNotesPerSpawn] = useState<number>(() => {
+    const saved = localStorage.getItem('piano_max_notes_per_spawn');
+    return saved !== null ? parseInt(saved, 10) : 1;
+  });
+  const [selectedKeySignature, setSelectedKeySignature] = useState<keyof typeof KEY_SIGNATURES | 'Random'>(() => {
+    const saved = localStorage.getItem('piano_selected_key_signature');
+    return (saved as any) || 'C Major';
+  });
+  const [activeKeySignature, setActiveKeySignature] = useState<keyof typeof KEY_SIGNATURES>(() => {
+    const saved = localStorage.getItem('piano_selected_key_signature');
+    if (saved && saved !== 'Random' && KEY_SIGNATURES[saved as keyof typeof KEY_SIGNATURES]) {
+      return saved as keyof typeof KEY_SIGNATURES;
+    }
+    return 'C Major';
+  });
+  const activeKeySignatureRef = useRef<keyof typeof KEY_SIGNATURES>(activeKeySignature);
   const measuresPlayedRef = useRef<number>(0);
   const [score, setScore] = useState(0);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -152,8 +177,93 @@ export default function App() {
   const [startTime, setStartTime] = useState<string | null>(null);
   const [startDateTime, setStartDateTime] = useState<Date | null>(null);
   const [elapsedMinutes, setElapsedMinutes] = useState<number>(0);
+  const [activeDurationMs, setActiveDurationMs] = useState<number>(0);
+  const [showPaceTracker, setShowPaceTracker] = useState<boolean>(() => {
+    return localStorage.getItem('piano_show_pace_tracker') === 'true';
+  });
+  const [correctHits, setCorrectHits] = useState<number>(0);
+  const [currentPace, setCurrentPace] = useState<number | null>(null);
+  const [highScores, setHighScores] = useState<Record<string, number>>(() => {
+    const saved = localStorage.getItem('piano_pace_high_scores');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return {};
+      }
+    }
+    return {};
+  });
+
+  const startDateTimeRef = useRef<Date | null>(null);
+  const scoreRef = useRef<number>(0);
+  const activeDurationMsRef = useRef<number>(0);
+  const isPlayingRef = useRef<boolean>(false);
+  const correctHitsRef = useRef<number>(0);
+
+  useEffect(() => {
+    startDateTimeRef.current = startDateTime;
+    scoreRef.current = score;
+    activeDurationMsRef.current = activeDurationMs;
+    isPlayingRef.current = isPlaying;
+    correctHitsRef.current = correctHits;
+  }, [startDateTime, score, activeDurationMs, isPlaying, correctHits]);
+
+  useEffect(() => {
+    const handleUnload = () => {
+      const isPlayingVal = isPlayingRef.current;
+      const startDateTimeVal = startDateTimeRef.current;
+      const durationMs = activeDurationMsRef.current;
+      const scoreVal = scoreRef.current;
+
+      if (isPlayingVal && startDateTimeVal && durationMs >= 3000) {
+        const minutes = Math.floor(durationMs / 60000);
+        const seconds = Math.floor((durationMs % 60000) / 1000);
+        
+        const formattedDate = startDateTimeVal.toLocaleString('pl-PL', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+
+        const item: HistoryItem = {
+          id: `${startDateTimeVal.getTime()}_${Date.now()}`,
+          date: formattedDate,
+          minutes,
+          seconds,
+          score: scoreVal
+        };
+
+        const saved = localStorage.getItem('piano_practice_history');
+        let currentHistory: HistoryItem[] = [];
+        if (saved) {
+          try {
+            currentHistory = JSON.parse(saved);
+          } catch (e) {
+            currentHistory = [];
+          }
+        }
+        const updated = [item, ...currentHistory].slice(0, 50);
+        localStorage.setItem('piano_practice_history', JSON.stringify(updated));
+      }
+    };
+
+    window.addEventListener('beforeunload', handleUnload);
+    window.addEventListener('pagehide', handleUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleUnload);
+      window.removeEventListener('pagehide', handleUnload);
+    };
+  }, []);
+
   const [isCompact, setIsCompact] = useState(false);
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('piano_sound_enabled');
+    return saved !== null ? saved === 'true' : true;
+  });
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('piano_note_master_dark_mode');
     if (saved !== null) {
@@ -162,22 +272,125 @@ export default function App() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
 
-  useEffect(() => {
-    if (!startDateTime) {
-      setElapsedMinutes(0);
-      return;
+  const [showHistory, setShowHistory] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [history, setHistory] = useState<HistoryItem[]>(() => {
+    const saved = localStorage.getItem('piano_practice_history');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return [];
+      }
     }
+    return [];
+  });
 
-    const updateElapsed = () => {
-      const mins = Math.floor((Date.now() - startDateTime.getTime()) / 60000);
-      setElapsedMinutes(mins);
+  const configKey = `${selectedKeySignature}_${maxNotesPerSpawn}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
+  const configRecord = highScores[configKey] || 0;
+
+  useEffect(() => {
+    localStorage.setItem('piano_show_pace_tracker', String(showPaceTracker));
+  }, [showPaceTracker]);
+
+  useEffect(() => {
+    localStorage.setItem('piano_ledger_lines', String(ledgerLines));
+  }, [ledgerLines]);
+
+  useEffect(() => {
+    localStorage.setItem('piano_use_accidentals', String(useAccidentals));
+  }, [useAccidentals]);
+
+  useEffect(() => {
+    localStorage.setItem('piano_max_notes_per_spawn', String(maxNotesPerSpawn));
+  }, [maxNotesPerSpawn]);
+
+  useEffect(() => {
+    localStorage.setItem('piano_selected_key_signature', selectedKeySignature);
+  }, [selectedKeySignature]);
+
+  useEffect(() => {
+    localStorage.setItem('piano_sound_enabled', String(soundEnabled));
+  }, [soundEnabled]);
+
+  useEffect(() => {
+    // Reset session-specific pace variables on parameter changes
+    setCorrectHits(0);
+    setCurrentPace(null);
+  }, [selectedKeySignature, maxNotesPerSpawn, ledgerLines, useAccidentals]);
+
+  const calculateAndSavePace = useCallback(() => {
+    const startDateTimeVal = startDateTimeRef.current;
+    if (!startDateTimeVal) return;
+    const elapsedSecs = activeDurationMsRef.current / 1000;
+    if (elapsedSecs < 1) return; // Prevent dividing by extremely short times
+
+    // Pace = correct notes per minute (NPM)
+    const pace = (correctHitsRef.current * 60) / elapsedSecs;
+    setCurrentPace(pace);
+
+    // Update record if beaten
+    const currentRecord = highScores[configKey] || 0;
+    if (pace > currentRecord) {
+      const nextHighScores = {
+        ...highScores,
+        [configKey]: pace,
+      };
+      setHighScores(nextHighScores);
+      localStorage.setItem('piano_pace_high_scores', JSON.stringify(nextHighScores));
+    }
+  }, [configKey, highScores]);
+
+  const saveSessionToHistory = useCallback(() => {
+    if (!startDateTime) return;
+    const durationMs = activeDurationMs;
+    if (durationMs < 3000) return; // ignore sessions shorter than 3 seconds
+    
+    const minutes = Math.floor(durationMs / 60000);
+    const seconds = Math.floor((durationMs % 60000) / 1000);
+    const formattedDate = startDateTime.toLocaleString('pl-PL', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    const newItem: HistoryItem = {
+      id: `${startDateTime.getTime()}_${Date.now()}`,
+      date: formattedDate,
+      minutes,
+      seconds,
+      score: score
     };
 
-    updateElapsed();
-    const interval = setInterval(updateElapsed, 1000);
+    setHistory(prev => {
+      const updated = [newItem, ...prev].slice(0, 50);
+      localStorage.setItem('piano_practice_history', JSON.stringify(updated));
+      return updated;
+    });
+  }, [startDateTime, score, activeDurationMs]);
+
+  useEffect(() => {
+    if (!isPlaying) return;
+
+    let lastTime = Date.now();
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const delta = now - lastTime;
+      lastTime = now;
+
+      if (!showHistory) {
+        setActiveDurationMs(prev => {
+          const nextVal = prev + delta;
+          setElapsedMinutes(Math.floor(nextVal / 60000));
+          return nextVal;
+        });
+      }
+    }, 200);
 
     return () => clearInterval(interval);
-  }, [startDateTime]);
+  }, [isPlaying, showHistory]);
 
   useEffect(() => {
     localStorage.setItem('piano_note_master_dark_mode', String(isDarkMode));
@@ -187,6 +400,12 @@ export default function App() {
       document.documentElement.classList.remove('dark');
     }
   }, [isDarkMode]);
+
+  useEffect(() => {
+    if (!showHistory) {
+      setShowClearConfirm(false);
+    }
+  }, [showHistory]);
 
   useEffect(() => {
     if (keyChangeAlert) {
@@ -288,6 +507,10 @@ export default function App() {
             if (usedN.isTreble === isTreble) {
               minAbsForClef = Math.min(minAbsForClef, usedN.abs);
               maxAbsForClef = Math.max(maxAbsForClef, usedN.abs);
+            } else {
+              // Avoid situation where bass notes are higher or equal to treble notes (and vice-versa)
+              if (isTreble && pAbs <= usedN.abs) return false;
+              if (!isTreble && pAbs >= usedN.abs) return false;
             }
           }
           
@@ -440,7 +663,7 @@ export default function App() {
     
     let status: 'hit' | 'miss' | 'default' = 'default';
 
-    if (!isPlaying) {
+    if (!isPlaying || showHistory) {
       setActivePianoNotes(prev => new Map(prev).set(pitch, 'default'));
       setTimeout(() => setActivePianoNotes(prev => {
         const next = new Map(prev);
@@ -474,6 +697,7 @@ export default function App() {
     if (matchingNote) {
       status = 'hit';
       setScore(s => s + 10);
+      setCorrectHits(c => c + 1);
       setFeedback({ type: 'hit', id: Date.now(), message: 'PERFECT!' });
 
       notesRef.current = currentNotes.map(n => 
@@ -490,7 +714,10 @@ export default function App() {
         } else {
           // Reached end of measure
           setTimeout(() => {
-            if (isPlaying) generateMeasure(); // only generate if still playing
+            if (isPlaying) {
+              calculateAndSavePace();
+              generateMeasure(); // only generate if still playing
+            }
           }, 500);
         }
         
@@ -519,9 +746,10 @@ export default function App() {
       next.set(pitch, status);
       return next;
     });
-  }, [isPlaying, generateMeasure, soundEnabled]);
+  }, [isPlaying, generateMeasure, soundEnabled, showHistory, calculateAndSavePace]);
 
   const resetGame = () => {
+    saveSessionToHistory();
     setScore(0);
     setNotes([]);
     notesRef.current = [];
@@ -531,14 +759,25 @@ export default function App() {
     setStartTime(null);
     setStartDateTime(null);
     setElapsedMinutes(0);
+    setActiveDurationMs(0);
     setActivePianoNotes(new Map());
     lastPressBeatRef.current = 0;
     measuresPlayedRef.current = 0;
+    setCorrectHits(0);
+    setCurrentPace(null);
   };
+
+  const totalSecs = history.reduce((acc, item) => acc + ((item.minutes ?? 0) * 60 + (item.seconds ?? 0)), 0);
+  const totalMins = Math.floor(totalSecs / 60);
+  const remSecs = totalSecs % 60;
+  const totalScore = history.reduce((acc, item) => acc + (item.score ?? 0), 0);
+
+  const activeMinutes = Math.floor(activeDurationMs / 60000);
+  const activeSeconds = Math.floor((activeDurationMs % 60000) / 1000);
 
   return (
     <div className={`min-h-[100dvh] md:h-[100dvh] font-sans flex flex-col items-center overflow-x-hidden overflow-y-auto md:overflow-hidden transition-all duration-500 w-full ${isDarkMode ? 'bg-zinc-950 text-zinc-100' : 'bg-neutral-50 text-neutral-900'} ${isCompact ? 'p-1' : 'p-2 md:p-4'}`}>
-      <header className={`w-full max-w-5xl xl:max-w-7xl shrink-0 flex flex-col sm:flex-row justify-between items-center gap-2 md:gap-4 ${isCompact ? 'mb-1' : 'mb-4'}`}>
+      <header className={`w-full shrink-0 flex flex-col sm:flex-row justify-between items-center gap-2 md:gap-4 ${isCompact ? 'mb-1' : 'mb-4'}`}>
         <div className="flex items-center gap-2">
           <div className="bg-blue-600 p-1.5 rounded-lg text-white">
             <Music size={isCompact ? 16 : 20} />
@@ -546,7 +785,32 @@ export default function App() {
           <h1 className={`${isCompact ? 'text-lg' : 'text-xl'} font-bold tracking-tight`}>Piano Note Master</h1>
         </div>
         
-        <div className={`flex flex-wrap items-center justify-center ${isCompact ? 'gap-1 md:gap-2' : 'gap-2 md:gap-4'}`}>
+        <div className="flex flex-col items-center sm:items-end gap-1.5 w-full sm:w-auto">
+          {showPaceTracker && (
+            <div className={`flex items-center gap-3 text-[11px] md:text-xs font-mono px-3 py-1 rounded-full shadow-xs transition-all animate-in fade-in slide-in-from-top-1 duration-300 ${
+              isDarkMode 
+                ? 'bg-zinc-900 border border-zinc-800 text-zinc-300' 
+                : 'bg-white border border-neutral-200 text-neutral-600'
+            }`}>
+              <div className="flex items-center gap-1.5">
+                <TrendingUp size={12} className="text-blue-500 animate-pulse" />
+                <span>Aktualne tempo:</span>
+                <strong className={isDarkMode ? 'text-zinc-100 font-extrabold' : 'text-neutral-900 font-extrabold'}>
+                  {currentPace !== null ? `${currentPace.toFixed(1)} NPM` : '—'}
+                </strong>
+              </div>
+              <div className={`w-px h-3 ${isDarkMode ? 'bg-zinc-800' : 'bg-neutral-200'}`} />
+              <div className="flex items-center gap-1.5">
+                <Trophy size={11} className="text-amber-500" />
+                <span>Rekord dla parametrów:</span>
+                <strong className="text-emerald-600 dark:text-emerald-400 font-extrabold">
+                  {configRecord > 0 ? `${configRecord.toFixed(1)} NPM` : '—'}
+                </strong>
+              </div>
+            </div>
+          )}
+
+          <div className={`flex flex-wrap items-center justify-center ${isCompact ? 'gap-1 md:gap-2' : 'gap-2 md:gap-4'} w-full sm:w-auto`}>
           {/* Key Signature Selector */}
           <select 
             value={selectedKeySignature}
@@ -605,6 +869,18 @@ export default function App() {
             </select>
           </div>
 
+          {/* Pace Tracker Toggle */}
+          <button 
+            onClick={() => setShowPaceTracker(!showPaceTracker)}
+            className={`${isCompact ? 'text-[10px] px-2' : 'text-xs md:text-sm px-4'} py-1 rounded-full border transition-all ${
+              showPaceTracker 
+                ? (isDarkMode ? 'bg-emerald-950/40 border-emerald-800/80 text-emerald-300' : 'bg-emerald-100 border-emerald-300 text-emerald-700') 
+                : (isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200' : 'bg-white border-neutral-200 text-neutral-500')
+            }`}
+          >
+            {isCompact ? 'Tempo' : 'Śledzenie tempa'}: {showPaceTracker ? 'WŁ' : 'WYŁ'}
+          </button>
+
           <div className={`flex items-center gap-2 px-3 py-1 rounded-full shadow-sm border transition-all ${
             isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-200' : 'bg-white border-neutral-200 text-neutral-900'
           }`}>
@@ -614,13 +890,23 @@ export default function App() {
 
           <button 
             onClick={() => {
-              if (!isPlaying && !startTime) {
-                const now = new Date();
-                setStartTime(now.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-                setStartDateTime(now);
+              if (isPlaying) {
+                // We are pausing! Save the session.
+                saveSessionToHistory();
+                setStartTime(null);
+                setStartDateTime(null);
                 setElapsedMinutes(0);
-                measuresPlayedRef.current = 0;
-                generateMeasure();
+                setActiveDurationMs(0);
+              } else {
+                if (!startTime) {
+                  const now = new Date();
+                  setStartTime(now.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+                  setStartDateTime(now);
+                  setElapsedMinutes(0);
+                  setActiveDurationMs(0);
+                  measuresPlayedRef.current = 0;
+                  generateMeasure();
+                }
               }
               setIsPlaying(!isPlaying);
             }}
@@ -651,6 +937,14 @@ export default function App() {
           </button>
 
           <button 
+            onClick={() => setShowHistory(true)}
+            className={`p-1.5 rounded-full transition-colors ${isDarkMode ? 'text-zinc-400 hover:text-zinc-200 bg-zinc-800/80 hover:bg-zinc-700' : 'text-neutral-500 hover:text-neutral-900 bg-white hover:bg-neutral-100/80'} border border-neutral-200 shadow-sm`}
+            title="Historia ostatnich ćwiczeń"
+          >
+            <History size={isCompact ? 14 : 16} />
+          </button>
+
+          <button 
             onClick={resetGame}
             className={`p-1.5 transition-colors ${isCompact ? 'hidden' : ''} ${isDarkMode ? 'text-zinc-500 hover:text-zinc-200' : 'text-neutral-400 hover:text-neutral-900'}`}
             title="Reset"
@@ -658,9 +952,12 @@ export default function App() {
             <RotateCcw size={18} />
           </button>
         </div>
-      </header>
+      </div>
+    </header>
 
-      <main className={`w-full max-w-5xl xl:max-w-7xl flex flex-col flex-1 min-h-0 ${isCompact ? 'gap-1' : 'gap-4'}`}>
+      <main className={`w-full flex flex-col flex-1 min-h-0 ${isCompact ? 'gap-1' : 'gap-4'}`}>
+
+
         {/* Staff Section */}
         <section className={`relative md:flex-1 md:min-h-0 rounded-xl transition-all duration-500 w-full ${keyChangeAlert ? 'ring-4 ring-amber-400 shadow-[0_0_25px_rgba(245,158,11,0.45)]' : ''}`}>
           <Staff 
@@ -733,6 +1030,210 @@ export default function App() {
           )}
         </section>
       </main>
+
+      {/* History Dialog Overlay */}
+      <AnimatePresence>
+        {showHistory && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowHistory(false)}
+              className="absolute inset-0 bg-black/65 backdrop-blur-xs"
+            />
+
+            {/* Modal Content */}
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 15 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 15 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+              className={`relative w-full max-w-lg rounded-2xl shadow-2xl border flex flex-col max-h-[80vh] overflow-hidden ${
+                isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-100 shadow-black/80' : 'bg-white border-neutral-200 text-neutral-900 shadow-neutral-300'
+              }`}
+            >
+              {/* Header */}
+              <div className={`p-4 border-b flex items-center justify-between ${
+                isDarkMode ? 'border-zinc-800' : 'border-neutral-100'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <Clock className="text-blue-500 w-5 h-5" />
+                  <h2 className="text-lg font-bold tracking-tight">Historia ostatnich ćwiczeń</h2>
+                </div>
+                <button
+                  onClick={() => setShowHistory(false)}
+                  className={`p-1.5 rounded-full transition-colors ${
+                    isDarkMode ? 'hover:bg-zinc-800 text-zinc-400' : 'hover:bg-neutral-100 text-neutral-500'
+                  }`}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Stats Summary Panel */}
+              {(history.length > 0 || startDateTime) && (
+                <div className={`px-4 py-3 border-b flex justify-around items-center gap-4 text-center ${
+                  isDarkMode ? 'border-zinc-800/60 bg-zinc-950/35' : 'border-neutral-100 bg-neutral-50/50'
+                }`}>
+                  <div>
+                    <span className="block text-[10px] uppercase font-bold text-neutral-800 dark:text-zinc-400 tracking-wider">Łączny czas gry</span>
+                    <strong className="text-sm font-black text-blue-600 dark:text-blue-400">
+                      {totalMins} min {remSecs} sek
+                    </strong>
+                  </div>
+                  <div className={`w-px h-8 ${isDarkMode ? 'bg-zinc-800' : 'bg-neutral-200'}`} />
+                  <div>
+                    <span className="block text-[10px] uppercase font-bold text-neutral-800 dark:text-zinc-400 tracking-wider">Liczba sesji</span>
+                    <strong className="text-sm font-black text-neutral-900 dark:text-zinc-200">
+                      {history.length}
+                    </strong>
+                  </div>
+                  <div className={`w-px h-8 ${isDarkMode ? 'bg-zinc-800' : 'bg-neutral-200'}`} />
+                  <div>
+                    <span className="block text-[10px] uppercase font-bold text-neutral-800 dark:text-zinc-400 tracking-wider">Zdobyte punkty</span>
+                    <strong className="text-sm font-black text-emerald-600 dark:text-emerald-400">
+                      {totalScore}
+                    </strong>
+                  </div>
+                </div>
+              )}
+
+              {/* List */}
+              <div className="p-4 overflow-y-auto flex-1 custom-scrollbar space-y-3">
+                {/* Active/In-Progress Session */}
+                {startDateTime && (
+                  <div
+                    className={`p-3 rounded-xl border border-dashed flex justify-between items-center transition-all animate-pulse ${
+                      isDarkMode ? 'bg-blue-950/20 border-blue-800/50 text-blue-300' : 'bg-blue-50/50 border-blue-200 text-blue-900'
+                    }`}
+                  >
+                    <div className="flex flex-col gap-1.5 items-start">
+                      <span className="text-xs font-bold text-blue-800 dark:text-blue-400 flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        Aktualna sesja (w toku)
+                      </span>
+                      <div className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border ${
+                        isDarkMode 
+                          ? 'bg-blue-950/60 text-blue-100 border-blue-800/60' 
+                          : 'bg-blue-900 text-white border-blue-950 shadow-xs'
+                      }`}>
+                        <Clock size={12} className="text-blue-300 dark:text-blue-400" />
+                        <span>
+                          Czas gry: <strong className="font-extrabold text-white">{activeMinutes} min {activeSeconds} sek</strong>
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="flex flex-col items-end">
+                        <span className="text-[10px] uppercase font-bold text-neutral-800 dark:text-zinc-400 tracking-wider">Wynik</span>
+                        <span className="text-sm font-mono font-black text-blue-600 dark:text-blue-400">+{score}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {history.length === 0 && !startDateTime ? (
+                  <div className="text-center py-10 flex flex-col items-center justify-center gap-2">
+                    <Music className={`w-8 h-8 ${isDarkMode ? 'text-zinc-700' : 'text-neutral-300'}`} />
+                    <p className={`text-sm ${isDarkMode ? 'text-zinc-400' : 'text-neutral-500'}`}>
+                      Brak zapisanych sesji ćwiczeń.
+                    </p>
+                    <p className={`text-xs ${isDarkMode ? 'text-zinc-600' : 'text-neutral-400'} max-w-xs`}>
+                      Zacznij grać i kliknij Pause lub Reset, aby zapisać swoją sesję w historii.
+                    </p>
+                  </div>
+                ) : (
+                  history.map((item) => (
+                    <div
+                      key={item.id}
+                      className={`p-3 rounded-xl border flex justify-between items-center transition-all ${
+                        isDarkMode ? 'bg-zinc-950/40 border-zinc-800/80 hover:bg-zinc-950/80' : 'bg-neutral-50/50 border-neutral-200/80 hover:bg-neutral-50'
+                      }`}
+                    >
+                      <div className="flex flex-col gap-2 items-start">
+                        <div className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border ${
+                          isDarkMode 
+                            ? 'bg-zinc-900 text-zinc-100 border-zinc-850' 
+                            : 'bg-zinc-800 text-white border-zinc-900 shadow-xs'
+                        }`}>
+                          <Calendar size={12} className="text-blue-300 dark:text-blue-400 shrink-0" />
+                          <span>
+                            Data: <strong className="font-extrabold text-white">{item.date}</strong>
+                          </span>
+                        </div>
+                        <div className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border ${
+                          isDarkMode 
+                            ? 'bg-zinc-900 text-zinc-100 border-zinc-850' 
+                            : 'bg-zinc-800 text-white border-zinc-900 shadow-xs'
+                        }`}>
+                          <Clock size={12} className="text-blue-300 dark:text-blue-400" />
+                          <span>
+                            Czas gry: <strong className="font-extrabold text-white">{(item.minutes ?? 0)} min {(item.seconds ?? 0)} sek</strong>
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <div className="flex flex-col items-end">
+                          <span className="text-[10px] uppercase font-bold text-neutral-800 dark:text-zinc-400 tracking-wider">Wynik</span>
+                          <span className="text-sm font-mono font-black text-blue-600 dark:text-blue-400">+{item.score}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Footer */}
+              {history.length > 0 && (
+                <div className={`p-3 border-t flex items-center justify-end ${
+                  isDarkMode ? 'border-zinc-800 bg-zinc-950/20' : 'border-neutral-100 bg-neutral-50/20'
+                }`}>
+                  {showClearConfirm ? (
+                    <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto justify-between sm:justify-end animate-in fade-in slide-in-from-bottom-1 duration-200">
+                      <span className="text-xs font-bold text-red-600 dark:text-red-400">
+                        Czy na pewno chcesz usunąć całą historię?
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setHistory([]);
+                            localStorage.removeItem('piano_practice_history');
+                            setShowClearConfirm(false);
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-600 text-white hover:bg-red-700 transition-colors shadow-xs"
+                        >
+                          Tak, usuń
+                        </button>
+                        <button
+                          onClick={() => setShowClearConfirm(false)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                            isDarkMode 
+                              ? 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700' 
+                              : 'bg-white border-neutral-200 text-neutral-700 hover:bg-neutral-100'
+                          }`}
+                        >
+                          Anuluj
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setShowClearConfirm(true)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold text-red-500 hover:bg-red-500/10 transition-all border border-transparent hover:border-red-500/20"
+                    >
+                      Wyczyść historię
+                    </button>
+                  )}
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -208,6 +208,61 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
     const primaryNoteColor = isDarkMode ? '#f4f4f5' : '#000000';
     const ledgerLineColor = isDarkMode ? 'rgba(255, 255, 255, 0.4)' : '#000000';
 
+    // Render rests
+    if (notes.length === 0) {
+      // Draw a single whole rest (pauza cała) centered on treble and bass staff
+      const drawWholeRest = (yOffset: number) => {
+        ctx.save();
+        ctx.fillStyle = primaryNoteColor;
+        const x = canvas.width / 2;
+        // Whole rest hangs down from the second line from the top (D5 on treble, F3 on bass)
+        const yLine = yOffset + STAFF_PADDING + 1 * LINE_SPACING;
+        const w = isCompact ? 18 : 26;
+        const h = isCompact ? 9 : 13;
+        ctx.fillRect(x - w / 2, yLine, w, h);
+        ctx.restore();
+      };
+      drawWholeRest(0);
+      drawWholeRest(BASS_OFFSET);
+    } else {
+      // Render quarter rests for beats with no notes on treble or bass clefs
+      const beatXs = [300, 500, 700, 900];
+      for (let b = 0; b < 4; b++) {
+        const trebleNotesInBeat = notes.filter(n => n.beatIndex === b && n.clef === 'treble');
+        const bassNotesInBeat = notes.filter(n => n.beatIndex === b && n.clef === 'bass');
+        const anyNotesInBeat = notes.filter(n => n.beatIndex === b);
+        
+        const x = anyNotesInBeat.length > 0 ? anyNotesInBeat[0].x : beatXs[b];
+        const isBeatCompleted = b < currentBeat;
+
+        // Draw treble rest if empty
+        if (trebleNotesInBeat.length === 0) {
+          ctx.save();
+          ctx.globalAlpha = isBeatCompleted ? 0.25 : 1.0;
+          ctx.fillStyle = primaryNoteColor;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.font = `${isCompact ? 40 : 56}px serif`;
+          const yRest = STAFF_PADDING + 2 * LINE_SPACING;
+          ctx.fillText('𝄽', x, yRest + (isCompact ? 1 : 2));
+          ctx.restore();
+        }
+
+        // Draw bass rest if empty
+        if (bassNotesInBeat.length === 0) {
+          ctx.save();
+          ctx.globalAlpha = isBeatCompleted ? 0.25 : 1.0;
+          ctx.fillStyle = primaryNoteColor;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.font = `${isCompact ? 40 : 56}px serif`;
+          const yRest = BASS_OFFSET + STAFF_PADDING + 2 * LINE_SPACING;
+          ctx.fillText('𝄽', x, yRest + (isCompact ? 1 : 2));
+          ctx.restore();
+        }
+      }
+    }
+
     notes.forEach(note => {
       ctx.globalAlpha = note.isHit ? 0.2 : 1.0;
 
@@ -278,7 +333,7 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
         ref={bgCanvasRef}
         width={1000}
         height={canvasHeight}
-        className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+        className="absolute inset-0 w-full h-full max-w-[1000px] max-h-[640px] m-auto object-contain pointer-events-none"
       />
       {children}
       <AnimatePresence mode="popLayout">
@@ -295,7 +350,7 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
             ref={fgCanvasRef}
             width={1000}
             height={canvasHeight}
-            className="w-full h-full object-contain pointer-events-none"
+            className="w-full h-full max-w-[1000px] max-h-[640px] m-auto object-contain pointer-events-none"
           />
         </motion.div>
       </AnimatePresence>
