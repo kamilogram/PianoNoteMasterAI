@@ -286,7 +286,8 @@ export default function App() {
     return [];
   });
 
-  const configKey = `${selectedKeySignature}_${maxNotesPerSpawn}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
+  const keyToUse = selectedKeySignature === 'Random' ? activeKeySignature : selectedKeySignature;
+  const configKey = `${keyToUse}_${maxNotesPerSpawn}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
   const configRecord = highScores[configKey] || 0;
 
   useEffect(() => {

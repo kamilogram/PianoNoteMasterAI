@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useCallback } from 'react';
 import { motion } from 'motion/react';
 
 interface PianoProps {
@@ -18,6 +18,18 @@ export const Piano: React.FC<PianoProps> = React.memo(({ onNotePress, activeNote
   const endOctave = (ledgerLines === 1) ? 5 : 6;
   
   const containerRef = useRef<HTMLDivElement>(null);
+  const c4Ref = useRef<HTMLDivElement>(null);
+
+  const centerC4 = useCallback(() => {
+    const container = containerRef.current;
+    const c4El = c4Ref.current;
+    if (container && c4El) {
+      const offsetLeft = c4El.offsetLeft;
+      const offsetWidth = c4El.offsetWidth;
+      const containerWidth = container.offsetWidth;
+      container.scrollLeft = offsetLeft + offsetWidth / 2 - containerWidth / 2;
+    }
+  }, []);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -34,6 +46,18 @@ export const Piano: React.FC<PianoProps> = React.memo(({ onNotePress, activeNote
     container.addEventListener('wheel', handleWheel, { passive: false });
     return () => container.removeEventListener('wheel', handleWheel);
   }, []);
+
+  useEffect(() => {
+    centerC4();
+    // Use a small delay to allow UI rendering to settle and apply correct scroll position
+    const timer = setTimeout(centerC4, 100);
+
+    window.addEventListener('resize', centerC4);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', centerC4);
+    };
+  }, [ledgerLines, isCompact, centerC4]);
 
   const octaves = [];
   for (let i = startOctave; i <= endOctave; i++) {
@@ -83,6 +107,7 @@ export const Piano: React.FC<PianoProps> = React.memo(({ onNotePress, activeNote
           return (
             <div 
               key={whiteKey.name}
+              ref={whiteKey.name === 'C4' ? c4Ref : undefined}
               className={`relative flex-shrink-0 flex justify-center ${isCompact ? 'w-[32px] min-w-[32px] md:w-auto md:flex-1' : 'w-[40px] min-w-[40px] md:w-auto md:flex-1'}`}
             >
               <motion.button
