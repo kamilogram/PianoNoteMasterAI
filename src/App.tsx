@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Piano } from './components/Piano';
 import { Staff } from './components/Staff';
 import { audioService } from './services/audioService';
-import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock, Sun, Moon, Volume2, VolumeX, TrendingUp, History, Calendar } from 'lucide-react';
+import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock, Sun, Moon, Volume2, VolumeX, TrendingUp, History, Calendar, Trash2, X } from 'lucide-react';
 
 interface Note {
   id: number;
@@ -141,6 +141,65 @@ const isAccidentalAllowed = (noteName: string, mod: 'sharp' | 'flat' | 'natural'
   return true;
 };
 
+const formatKeySignatureWithAccidentals = (keyName: string) => {
+  if (!keyName) return '';
+  if (keyName === 'Random' || keyName === 'Losowo') return 'Losowo';
+  const sig = KEY_SIGNATURES[keyName as keyof typeof KEY_SIGNATURES];
+  if (!sig) return keyName;
+  if (sig.sharps.length > 0) {
+    return `${keyName} (${sig.sharps.length}♯)`;
+  }
+  if (sig.flats.length > 0) {
+    return `${keyName} (${sig.flats.length}♭)`;
+  }
+  return `${keyName} (0)`;
+};
+
+const parseConfigKey = (key: string) => {
+  const parts = key.split('_');
+  if (parts.length >= 4) {
+    const accPart = parts[parts.length - 1];
+    const ledgerPart = parts[parts.length - 2];
+    const notesPart = parts[parts.length - 3];
+    const keySigPart = parts.slice(0, parts.length - 3).join('_');
+    
+    const notesNum = parseInt(notesPart, 10);
+    const ledgerNum = parseInt(ledgerPart, 10);
+
+    return {
+      keySignature: keySigPart,
+      maxNotesPerSpawn: `${notesPart} ${notesNum === 1 ? 'nuta' : (notesNum < 5 ? 'nuty' : 'nut')}`,
+      ledgerLines: `${ledgerPart} ${ledgerNum === 1 ? 'linia dodana' : (ledgerNum < 5 ? 'linie dodane' : 'linii dodanych')}`,
+      useAccidentals: accPart === 'acc' ? 'Ze znakami' : 'Bez znaków'
+    };
+  }
+  return {
+    keySignature: key,
+    maxNotesPerSpawn: '',
+    ledgerLines: '',
+    useAccidentals: ''
+  };
+};
+
+const deduplicateHistory = (items: HistoryItem[]): HistoryItem[] => {
+  if (!Array.isArray(items)) return [];
+  const seen = new Set<string>();
+  const result: HistoryItem[] = [];
+  for (const item of items) {
+    if (!item) continue;
+    const dateStr = (item.date || '').trim();
+    const minutes = item.minutes ?? 0;
+    const seconds = item.seconds ?? 0;
+    const score = item.score ?? 0;
+    const key = `${dateStr}_${minutes}_${seconds}_${score}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(item);
+    }
+  }
+  return result;
+};
+
 export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [ledgerLines, setLedgerLines] = useState<number>(() => {
@@ -240,12 +299,15 @@ export default function App() {
         let currentHistory: HistoryItem[] = [];
         if (saved) {
           try {
-            currentHistory = JSON.parse(saved);
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed)) {
+              currentHistory = parsed;
+            }
           } catch (e) {
             currentHistory = [];
           }
         }
-        const updated = [item, ...currentHistory].slice(0, 50);
+        const updated = deduplicateHistory([item, ...currentHistory]).slice(0, 50);
         localStorage.setItem('piano_practice_history', JSON.stringify(updated));
       }
     };
@@ -274,17 +336,53 @@ export default function App() {
 
   const [showHistory, setShowHistory] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showRecordsModal, setShowRecordsModal] = useState(false);
+  const [showClearRecordsConfirm, setShowClearRecordsConfirm] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>(() => {
     const saved = localStorage.getItem('piano_practice_history');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return deduplicateHistory(parsed);
+        }
       } catch (e) {
         return [];
       }
     }
     return [];
   });
+
+  const handleDeleteHistoryItem = (idToDelete: string) => {
+    setHistory(prev => {
+      const updated = prev.filter(item => item.id !== idToDelete);
+      localStorage.setItem('piano_practice_history', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const handleCleanDuplicates = () => {
+    setHistory(prev => {
+      const cleaned = deduplicateHistory(prev);
+      localStorage.setItem('piano_practice_history', JSON.stringify(cleaned));
+      return cleaned;
+    });
+  };
+
+  const handleDeleteRecord = (keyToDelete: string) => {
+    setHighScores(prev => {
+      const next = { ...prev };
+      delete next[keyToDelete];
+      localStorage.setItem('piano_pace_high_scores', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const handleClearAllRecords = () => {
+    setHighScores({});
+    localStorage.removeItem('piano_pace_high_scores');
+    setShowClearRecordsConfirm(false);
+  };
 
   const keyToUse = selectedKeySignature === 'Random' ? activeKeySignature : selectedKeySignature;
   const configKey = `${keyToUse}_${maxNotesPerSpawn}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
@@ -366,7 +464,7 @@ export default function App() {
     };
 
     setHistory(prev => {
-      const updated = [newItem, ...prev].slice(0, 50);
+      const updated = deduplicateHistory([newItem, ...prev]).slice(0, 50);
       localStorage.setItem('piano_practice_history', JSON.stringify(updated));
       return updated;
     });
@@ -376,12 +474,24 @@ export default function App() {
     if (!isPlaying) return;
 
     let lastTime = Date.now();
+
+    const handleResetTime = () => {
+      lastTime = Date.now();
+    };
+
+    document.addEventListener('visibilitychange', handleResetTime);
+    window.addEventListener('blur', handleResetTime);
+    window.addEventListener('focus', handleResetTime);
+
     const interval = setInterval(() => {
       const now = Date.now();
       const delta = now - lastTime;
       lastTime = now;
 
-      if (!showHistory) {
+      const isDocumentActive = !document.hidden;
+      const isModalOpen = showHistory || showRecordsModal;
+
+      if (isDocumentActive && !isModalOpen && delta > 0 && delta <= 1500) {
         setActiveDurationMs(prev => {
           const nextVal = prev + delta;
           setElapsedMinutes(Math.floor(nextVal / 60000));
@@ -390,8 +500,13 @@ export default function App() {
       }
     }, 200);
 
-    return () => clearInterval(interval);
-  }, [isPlaying, showHistory]);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleResetTime);
+      window.removeEventListener('blur', handleResetTime);
+      window.removeEventListener('focus', handleResetTime);
+    };
+  }, [isPlaying, showHistory, showRecordsModal]);
 
   useEffect(() => {
     localStorage.setItem('piano_note_master_dark_mode', String(isDarkMode));
@@ -405,6 +520,14 @@ export default function App() {
   useEffect(() => {
     if (!showHistory) {
       setShowClearConfirm(false);
+    } else {
+      setHistory(prev => {
+        const cleaned = deduplicateHistory(prev);
+        if (cleaned.length !== prev.length) {
+          localStorage.setItem('piano_practice_history', JSON.stringify(cleaned));
+        }
+        return cleaned;
+      });
     }
   }, [showHistory]);
 
@@ -577,8 +700,11 @@ export default function App() {
         
         let targetMod = sigState;
 
-        const hasMeasureAccidental = measureAccidentals.has(basePitch);
-        const existingMeasureMod = measureAccidentals.get(basePitch);
+        const clefKey = isTreble ? 'treble' : 'bass';
+        const accidentalKey = `${clefKey}_${basePitch}`;
+
+        const hasMeasureAccidental = measureAccidentals.has(accidentalKey);
+        const existingMeasureMod = measureAccidentals.get(accidentalKey);
 
         if (hasMeasureAccidental && existingMeasureMod && Math.random() < 0.90) {
           // Keep the existing modification 90% of the time, so cancellations/changes are rare
@@ -619,14 +745,14 @@ export default function App() {
           finalActualPitch = basePitch;
         }
 
-        const currentMod = measureAccidentals.has(basePitch) ? measureAccidentals.get(basePitch) : sigState;
+        const currentMod = measureAccidentals.has(accidentalKey) ? measureAccidentals.get(accidentalKey) : sigState;
 
         if (targetMod !== currentMod) {
           if (targetMod === 'sharp') accidental = '♯';
           else if (targetMod === 'flat') accidental = '♭';
           else accidental = '♮';
           
-          measureAccidentals.set(basePitch, targetMod);
+          measureAccidentals.set(accidentalKey, targetMod);
         }
 
         newNotes.push({
@@ -801,13 +927,17 @@ export default function App() {
                 </strong>
               </div>
               <div className={`w-px h-3 ${isDarkMode ? 'bg-zinc-800' : 'bg-neutral-200'}`} />
-              <div className="flex items-center gap-1.5">
-                <Trophy size={11} className="text-amber-500" />
+              <button
+                onClick={() => setShowRecordsModal(true)}
+                className="flex items-center gap-1.5 hover:underline cursor-pointer group"
+                title="Kliknij, aby zobaczyć i zarządzać wszystkimi rekordami prędkości"
+              >
+                <Trophy size={11} className="text-amber-500 group-hover:scale-110 transition-transform" />
                 <span>Rekord dla parametrów:</span>
                 <strong className="text-emerald-600 dark:text-emerald-400 font-extrabold">
                   {configRecord > 0 ? `${configRecord.toFixed(1)} NPM` : '—'}
                 </strong>
-              </div>
+              </button>
             </div>
           )}
 
@@ -935,6 +1065,14 @@ export default function App() {
             title={soundEnabled ? "Wycisz dźwięki" : "Włącz dźwięki"}
           >
             {soundEnabled ? <Volume2 size={isCompact ? 14 : 16} /> : <VolumeX size={isCompact ? 14 : 16} />}
+          </button>
+
+          <button 
+            onClick={() => setShowRecordsModal(true)}
+            className={`p-1.5 rounded-full transition-colors ${isDarkMode ? 'text-amber-400 hover:text-amber-300 bg-zinc-800/80 hover:bg-zinc-700' : 'text-amber-600 hover:text-amber-700 bg-white hover:bg-neutral-100/80'} border border-neutral-200 shadow-sm`}
+            title="Tabela rekordów prędkości"
+          >
+            <Trophy size={isCompact ? 14 : 16} />
           </button>
 
           <button 
@@ -1177,11 +1315,20 @@ export default function App() {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-3">
                         <div className="flex flex-col items-end">
                           <span className="text-[10px] uppercase font-bold text-neutral-800 dark:text-zinc-400 tracking-wider">Wynik</span>
                           <span className="text-sm font-mono font-black text-blue-600 dark:text-blue-400">+{item.score}</span>
                         </div>
+                        <button
+                          onClick={() => handleDeleteHistoryItem(item.id)}
+                          className={`p-1.5 rounded-lg transition-colors ${
+                            isDarkMode ? 'hover:bg-red-950/50 text-zinc-500 hover:text-red-400' : 'hover:bg-red-50 text-neutral-400 hover:text-red-600'
+                          }`}
+                          title="Usuń ten wpis z historii"
+                        >
+                          <Trash2 size={16} />
+                        </button>
                       </div>
                     </div>
                   ))
@@ -1190,9 +1337,21 @@ export default function App() {
 
               {/* Footer */}
               {history.length > 0 && (
-                <div className={`p-3 border-t flex items-center justify-end ${
+                <div className={`p-3 border-t flex items-center justify-between gap-2 ${
                   isDarkMode ? 'border-zinc-800 bg-zinc-950/20' : 'border-neutral-100 bg-neutral-50/20'
                 }`}>
+                  <button
+                    onClick={handleCleanDuplicates}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                      isDarkMode
+                        ? 'border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                        : 'border-neutral-200 text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100'
+                    }`}
+                    title="Usuń powtarzające się wpisy w historii"
+                  >
+                    Wyczyść duplikaty
+                  </button>
+
                   {showClearConfirm ? (
                     <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto justify-between sm:justify-end animate-in fade-in slide-in-from-bottom-1 duration-200">
                       <span className="text-xs font-bold text-red-600 dark:text-red-400">
@@ -1227,6 +1386,166 @@ export default function App() {
                       className="px-3 py-1.5 rounded-lg text-xs font-semibold text-red-500 hover:bg-red-500/10 transition-all border border-transparent hover:border-red-500/20"
                     >
                       Wyczyść historię
+                    </button>
+                  )}
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+
+        {/* Speed Records Modal */}
+        {showRecordsModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 15 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 15 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+              className={`relative w-full max-w-lg rounded-2xl shadow-2xl border flex flex-col max-h-[85vh] overflow-hidden ${
+                isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-100 shadow-black/80' : 'bg-white border-neutral-200 text-neutral-900 shadow-neutral-300'
+              }`}
+            >
+              {/* Header */}
+              <div className={`p-4 border-b flex items-center justify-between ${
+                isDarkMode ? 'border-zinc-800' : 'border-neutral-100'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <Trophy className="text-amber-500 w-5 h-5" />
+                  <div>
+                    <h2 className="text-lg font-bold tracking-tight">Tabela rekordów prędkości</h2>
+                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400">NPM - Nuty Na Minutę dla poszczególnych opcji</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowRecordsModal(false)}
+                  className={`p-1.5 rounded-full transition-colors ${
+                    isDarkMode ? 'hover:bg-zinc-800 text-zinc-400' : 'hover:bg-neutral-100 text-neutral-500'
+                  }`}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* List of records */}
+              <div className="p-4 overflow-y-auto flex-1 custom-scrollbar space-y-3">
+                {(Object.entries(highScores) as [string, number][]).filter(([_, scoreVal]) => scoreVal > 0).length === 0 ? (
+                  <div className="text-center py-10 flex flex-col items-center justify-center gap-2">
+                    <Trophy className={`w-8 h-8 ${isDarkMode ? 'text-zinc-700' : 'text-neutral-300'}`} />
+                    <p className={`text-sm ${isDarkMode ? 'text-zinc-400' : 'text-neutral-500'}`}>
+                      Brak zapisanych rekordów prędkości.
+                    </p>
+                    <p className={`text-xs ${isDarkMode ? 'text-zinc-600' : 'text-neutral-400'} max-w-xs`}>
+                      Graj z włączonym śledzeniem tempa, aby automatycznie ustanawiać rekordy prędkości dla poszczególnych tonacji i opcji.
+                    </p>
+                  </div>
+                ) : (
+                  (Object.entries(highScores) as [string, number][])
+                    .filter(([_, scoreVal]) => scoreVal > 0)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([key, scoreVal]) => {
+                      const parsed = parseConfigKey(key);
+                      const isCurrentConfig = key === configKey;
+
+                      return (
+                        <div
+                          key={key}
+                          className={`p-3 rounded-xl border flex justify-between items-center transition-all gap-3 ${
+                            isCurrentConfig
+                              ? (isDarkMode ? 'bg-amber-950/25 border-amber-500/50' : 'bg-amber-50/80 border-amber-300')
+                              : (isDarkMode ? 'bg-zinc-950/40 border-zinc-800/80 hover:bg-zinc-950/80' : 'bg-neutral-50/50 border-neutral-200/80 hover:bg-neutral-50')
+                          }`}
+                        >
+                          <div className="flex flex-col gap-1.5 items-start">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-bold text-sm">
+                                {formatKeySignatureWithAccidentals(parsed.keySignature)}
+                              </span>
+                              {isCurrentConfig && (
+                                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-500 text-black">
+                                  Aktualne ustawienia
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex flex-wrap gap-1.5 text-[11px]">
+                              <span className={`px-2 py-0.5 rounded-md border ${
+                                isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-neutral-200 text-neutral-600'
+                              }`}>
+                                {parsed.maxNotesPerSpawn}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded-md border ${
+                                isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-neutral-200 text-neutral-600'
+                              }`}>
+                                {parsed.ledgerLines}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded-md border ${
+                                isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-neutral-200 text-neutral-600'
+                              }`}>
+                                {parsed.useAccidentals}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3 shrink-0">
+                            <div className="flex flex-col items-end">
+                              <span className="text-[10px] uppercase font-bold text-neutral-400 dark:text-zinc-500 tracking-wider">Rekord</span>
+                              <span className="text-sm font-mono font-black text-emerald-600 dark:text-emerald-400">
+                                {scoreVal.toFixed(1)} NPM
+                              </span>
+                            </div>
+
+                            <button
+                              onClick={() => handleDeleteRecord(key)}
+                              className={`p-1.5 rounded-lg transition-colors ${
+                                isDarkMode ? 'hover:bg-red-950/50 text-zinc-500 hover:text-red-400' : 'hover:bg-red-50 text-neutral-400 hover:text-red-600'
+                              }`}
+                              title="Usuń ten rekord"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                )}
+              </div>
+
+              {/* Footer */}
+              {(Object.entries(highScores) as [string, number][]).filter(([_, scoreVal]) => scoreVal > 0).length > 0 && (
+                <div className={`p-3 border-t flex items-center justify-end ${
+                  isDarkMode ? 'border-zinc-800 bg-zinc-950/20' : 'border-neutral-100 bg-neutral-50/20'
+                }`}>
+                  {showClearRecordsConfirm ? (
+                    <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto justify-between sm:justify-end animate-in fade-in slide-in-from-bottom-1 duration-200">
+                      <span className="text-xs font-bold text-red-600 dark:text-red-400">
+                        Czy na pewno chcesz usunąć wszystkie rekordy?
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleClearAllRecords}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-600 text-white hover:bg-red-700 transition-colors shadow-xs"
+                        >
+                          Tak, usuń
+                        </button>
+                        <button
+                          onClick={() => setShowClearRecordsConfirm(false)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                            isDarkMode 
+                              ? 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700' 
+                              : 'bg-white border-neutral-200 text-neutral-700 hover:bg-neutral-100'
+                          }`}
+                        >
+                          Anuluj
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setShowClearRecordsConfirm(true)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold text-red-500 hover:bg-red-500/10 transition-all border border-transparent hover:border-red-500/20"
+                    >
+                      Usuń wszystkie rekordy
                     </button>
                   )}
                 </div>
