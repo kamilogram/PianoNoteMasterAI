@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Piano } from './components/Piano';
 import { Staff } from './components/Staff';
 import { audioService } from './services/audioService';
-import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock, Sun, Moon, Volume2, VolumeX, TrendingUp, History, Calendar, Trash2, X } from 'lucide-react';
+import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock, Sun, Moon, Volume2, VolumeX, TrendingUp, History, Calendar, Trash2, X, SlidersHorizontal, Plus, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface Note {
   id: number;
@@ -141,6 +141,23 @@ const isAccidentalAllowed = (noteName: string, mod: 'sharp' | 'flat' | 'natural'
   return true;
 };
 
+export type SortField = 'score' | 'notes' | 'ledger' | 'accCount' | 'keyName' | 'useAccidentals';
+export type SortOrder = 'desc' | 'asc';
+
+export interface SortRule {
+  field: SortField;
+  order: SortOrder;
+}
+
+const SORT_FIELD_LABELS: Record<SortField, string> = {
+  score: 'Prędkość (NPM)',
+  notes: 'Liczba nut naraz',
+  ledger: 'Linie dodane (kreski)',
+  accCount: 'Liczba znaków (♯/♭)',
+  keyName: 'Nazwa tonacji',
+  useAccidentals: 'Znaki przypadkowe (Tak/Nie)'
+};
+
 const formatKeySignatureWithAccidentals = (keyName: string) => {
   if (!keyName) return '';
   if (keyName === 'Random' || keyName === 'Losowo') return 'Losowo';
@@ -163,22 +180,75 @@ const parseConfigKey = (key: string) => {
     const notesPart = parts[parts.length - 3];
     const keySigPart = parts.slice(0, parts.length - 3).join('_');
     
-    const notesNum = parseInt(notesPart, 10);
-    const ledgerNum = parseInt(ledgerPart, 10);
+    const notesNum = parseInt(notesPart, 10) || 1;
+    const ledgerNum = parseInt(ledgerPart, 10) || 0;
+
+    let accidentalsCount = 0;
+    const sig = KEY_SIGNATURES[keySigPart as keyof typeof KEY_SIGNATURES];
+    if (sig) {
+      accidentalsCount = sig.sharps.length + sig.flats.length;
+    }
 
     return {
       keySignature: keySigPart,
       maxNotesPerSpawn: `${notesPart} ${notesNum === 1 ? 'nuta' : (notesNum < 5 ? 'nuty' : 'nut')}`,
       ledgerLines: `${ledgerPart} ${ledgerNum === 1 ? 'linia dodana' : (ledgerNum < 5 ? 'linie dodane' : 'linii dodanych')}`,
-      useAccidentals: accPart === 'acc' ? 'Ze znakami' : 'Bez znaków'
+      useAccidentals: accPart === 'acc' ? 'Ze znakami' : 'Bez znaków',
+      rawNotes: notesNum,
+      rawLedger: ledgerNum,
+      rawAccidentals: accPart === 'acc' ? 1 : 0,
+      accidentalsCount
     };
   }
   return {
     keySignature: key,
     maxNotesPerSpawn: '',
     ledgerLines: '',
-    useAccidentals: ''
+    useAccidentals: '',
+    rawNotes: 1,
+    rawLedger: 0,
+    rawAccidentals: 0,
+    accidentalsCount: 0
   };
+};
+
+const compareParsedRecords = (
+  keyA: string,
+  scoreA: number,
+  keyB: string,
+  scoreB: number,
+  rules: SortRule[]
+) => {
+  const parsedA = parseConfigKey(keyA);
+  const parsedB = parseConfigKey(keyB);
+
+  for (const rule of rules) {
+    let diff = 0;
+    switch (rule.field) {
+      case 'score':
+        diff = scoreA - scoreB;
+        break;
+      case 'notes':
+        diff = parsedA.rawNotes - parsedB.rawNotes;
+        break;
+      case 'ledger':
+        diff = parsedA.rawLedger - parsedB.rawLedger;
+        break;
+      case 'accCount':
+        diff = parsedA.accidentalsCount - parsedB.accidentalsCount;
+        break;
+      case 'keyName':
+        diff = parsedA.keySignature.localeCompare(parsedB.keySignature, 'pl');
+        break;
+      case 'useAccidentals':
+        diff = parsedA.rawAccidentals - parsedB.rawAccidentals;
+        break;
+    }
+    if (diff !== 0) {
+      return rule.order === 'desc' ? -diff : diff;
+    }
+  }
+  return 0;
 };
 
 const deduplicateHistory = (items: HistoryItem[]): HistoryItem[] => {
@@ -338,6 +408,12 @@ export default function App() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showRecordsModal, setShowRecordsModal] = useState(false);
   const [showClearRecordsConfirm, setShowClearRecordsConfirm] = useState(false);
+  const [sortRules, setSortRules] = useState<SortRule[]>([
+    { field: 'score', order: 'desc' },
+    { field: 'notes', order: 'desc' },
+    { field: 'ledger', order: 'desc' }
+  ]);
+  const [showAdvancedSortPanel, setShowAdvancedSortPanel] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>(() => {
     const saved = localStorage.getItem('piano_practice_history');
     if (saved) {
@@ -1427,6 +1503,196 @@ export default function App() {
                 </button>
               </div>
 
+              {/* Advanced Multi-Criteria Sort Control Bar */}
+              {(Object.entries(highScores) as [string, number][]).filter(([_, scoreVal]) => scoreVal > 0).length > 0 && (
+                <div className={`px-4 py-2.5 border-b text-xs flex flex-col gap-2 ${
+                  isDarkMode ? 'border-zinc-800 bg-zinc-950/40' : 'border-neutral-100 bg-neutral-50/70'
+                }`}>
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <button
+                      onClick={() => setShowAdvancedSortPanel(prev => !prev)}
+                      className="flex items-center gap-1.5 font-bold text-neutral-800 dark:text-zinc-200 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+                    >
+                      <SlidersHorizontal size={14} className="text-amber-500" />
+                      <span>Zaawansowane sortowanie ({sortRules.length} {sortRules.length === 1 ? 'warunek' : (sortRules.length < 5 ? 'warunki' : 'warunków')})</span>
+                      {showAdvancedSortPanel ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    </button>
+
+                    <div className="flex items-center gap-1 text-[11px] flex-wrap">
+                      <span className="text-neutral-400 dark:text-zinc-500 mr-1 hidden sm:inline">Presety:</span>
+                      <button
+                        onClick={() => setSortRules([{ field: 'score', order: 'desc' }])}
+                        className={`px-2 py-0.5 rounded-md font-medium transition-all border ${
+                          sortRules.length === 1 && sortRules[0].field === 'score' && sortRules[0].order === 'desc'
+                            ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/40 font-bold'
+                            : (isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200' : 'bg-white border-neutral-200 text-neutral-600 hover:text-neutral-900')
+                        }`}
+                        title="Sortuj tylko po prędkości NPM (malejąco)"
+                      >
+                        ⚡ Prędkość
+                      </button>
+                      <button
+                        onClick={() => setSortRules([
+                          { field: 'notes', order: 'desc' },
+                          { field: 'ledger', order: 'desc' },
+                          { field: 'score', order: 'desc' }
+                        ])}
+                        className={`px-2 py-0.5 rounded-md font-medium transition-all border ${
+                          sortRules.length === 3 && sortRules[0].field === 'notes' && sortRules[1].field === 'ledger'
+                            ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/40 font-bold'
+                            : (isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200' : 'bg-white border-neutral-200 text-neutral-600 hover:text-neutral-900')
+                        }`}
+                        title="Sortuj wg trudności: najpierw ilość nut, potem linie dodane, potem prędkość"
+                      >
+                        🎼 Trudność
+                      </button>
+                      <button
+                        onClick={() => setSortRules([
+                          { field: 'accCount', order: 'desc' },
+                          { field: 'keyName', order: 'asc' },
+                          { field: 'score', order: 'desc' }
+                        ])}
+                        className={`px-2 py-0.5 rounded-md font-medium transition-all border ${
+                          sortRules.length === 3 && sortRules[0].field === 'accCount'
+                            ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/40 font-bold'
+                            : (isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200' : 'bg-white border-neutral-200 text-neutral-600 hover:text-neutral-900')
+                        }`}
+                        title="Sortuj po ilości znaków przykluczowych, nazwie tonacji i prędkości"
+                      >
+                        🎵 Tonacja
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Expandable Multi-Level Sort Rules Builder */}
+                  {showAdvancedSortPanel && (
+                    <div className={`mt-2 p-3 rounded-xl border flex flex-col gap-2.5 animate-in fade-in slide-in-from-top-1 duration-200 ${
+                      isDarkMode ? 'bg-zinc-950/90 border-zinc-800' : 'bg-white border-neutral-200 shadow-xs'
+                    }`}>
+                      <div className="text-[10px] font-bold text-neutral-400 dark:text-zinc-500 uppercase tracking-wider">
+                        Kolejność kryteriów (priorytet od góry do dołu):
+                      </div>
+
+                      {sortRules.map((rule, index) => {
+                        const availableFields: SortField[] = [
+                          'score', 'notes', 'ledger', 'accCount', 'keyName', 'useAccidentals'
+                        ];
+
+                        return (
+                          <div key={index} className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                            <span className="text-[11px] font-bold text-amber-500 shrink-0 w-10">
+                              #{index + 1}.
+                            </span>
+
+                            {/* Select field */}
+                            <select
+                              value={rule.field}
+                              onChange={(e) => {
+                                const newField = e.target.value as SortField;
+                                setSortRules(prev => prev.map((r, idx) => idx === index ? { ...r, field: newField } : r));
+                              }}
+                              className={`flex-1 text-xs px-2.5 py-1.5 rounded-lg border font-medium focus:outline-hidden ${
+                                isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-100' : 'bg-neutral-50 border-neutral-300 text-neutral-800'
+                              }`}
+                            >
+                              {availableFields.map(f => (
+                                <option key={f} value={f} disabled={sortRules.some((r, idx) => idx !== index && r.field === f)}>
+                                  {SORT_FIELD_LABELS[f]}
+                                </option>
+                              ))}
+                            </select>
+
+                            {/* Select direction */}
+                            <select
+                              value={rule.order}
+                              onChange={(e) => {
+                                const newOrder = e.target.value as SortOrder;
+                                setSortRules(prev => prev.map((r, idx) => idx === index ? { ...r, order: newOrder } : r));
+                              }}
+                              className={`text-xs px-2.5 py-1.5 rounded-lg border font-semibold focus:outline-hidden ${
+                                isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-100' : 'bg-neutral-50 border-neutral-300 text-neutral-800'
+                              }`}
+                            >
+                              <option value="desc">Malejąco ↓</option>
+                              <option value="asc">Rosnąco ↑</option>
+                            </select>
+
+                            {/* Move up/down buttons */}
+                            <div className="flex items-center gap-0.5">
+                              <button
+                                disabled={index === 0}
+                                onClick={() => {
+                                  setSortRules(prev => {
+                                    const next = [...prev];
+                                    const temp = next[index - 1];
+                                    next[index - 1] = next[index];
+                                    next[index] = temp;
+                                    return next;
+                                  });
+                                }}
+                                className={`p-1.5 rounded-md transition-colors disabled:opacity-30 ${
+                                  isDarkMode ? 'hover:bg-zinc-800 text-zinc-400' : 'hover:bg-neutral-100 text-neutral-600'
+                                }`}
+                                title="Przesuń priorytet wyżej"
+                              >
+                                <ChevronUp size={14} />
+                              </button>
+                              <button
+                                disabled={index === sortRules.length - 1}
+                                onClick={() => {
+                                  setSortRules(prev => {
+                                    const next = [...prev];
+                                    const temp = next[index + 1];
+                                    next[index + 1] = next[index];
+                                    next[index] = temp;
+                                    return next;
+                                  });
+                                }}
+                                className={`p-1.5 rounded-md transition-colors disabled:opacity-30 ${
+                                  isDarkMode ? 'hover:bg-zinc-800 text-zinc-400' : 'hover:bg-neutral-100 text-neutral-600'
+                                }`}
+                                title="Przesuń priorytet niżej"
+                              >
+                                <ChevronDown size={14} />
+                              </button>
+                            </div>
+
+                            {/* Delete rule button */}
+                            {sortRules.length > 1 && (
+                              <button
+                                onClick={() => {
+                                  setSortRules(prev => prev.filter((_, idx) => idx !== index));
+                                }}
+                                className="p-1.5 rounded-md transition-colors text-red-500 hover:bg-red-500/10"
+                                title="Usuń ten warunek"
+                              >
+                                <X size={14} />
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      {sortRules.length < 6 && (
+                        <button
+                          onClick={() => {
+                            const used = new Set(sortRules.map(r => r.field));
+                            const available: SortField[] = ['score', 'notes', 'ledger', 'accCount', 'keyName', 'useAccidentals'];
+                            const nextUnused = available.find(f => !used.has(f));
+                            if (nextUnused) {
+                              setSortRules(prev => [...prev, { field: nextUnused, order: 'desc' }]);
+                            }
+                          }}
+                          className="mt-1 self-start flex items-center gap-1 text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline"
+                        >
+                          <Plus size={14} /> Dodaj kolejny warunek sortowania
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* List of records */}
               <div className="p-4 overflow-y-auto flex-1 custom-scrollbar space-y-3">
                 {(Object.entries(highScores) as [string, number][]).filter(([_, scoreVal]) => scoreVal > 0).length === 0 ? (
@@ -1442,7 +1708,9 @@ export default function App() {
                 ) : (
                   (Object.entries(highScores) as [string, number][])
                     .filter(([_, scoreVal]) => scoreVal > 0)
-                    .sort((a, b) => b[1] - a[1])
+                    .sort(([keyA, scoreA], [keyB, scoreB]) =>
+                      compareParsedRecords(keyA, scoreA, keyB, scoreB, sortRules)
+                    )
                     .map(([key, scoreVal]) => {
                       const parsed = parseConfigKey(key);
                       const isCurrentConfig = key === configKey;
