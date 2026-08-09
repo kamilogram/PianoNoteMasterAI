@@ -25,18 +25,18 @@ interface StaffProps {
 
 // Scaling constants
 const DEFAULT_LINE_SPACING = 24; 
-const DEFAULT_STAFF_PADDING = 120;
+const DEFAULT_STAFF_PADDING = 130;
 const DEFAULT_CLEF_X = 20;
 const DEFAULT_SIG_START_X = 100;
 const DEFAULT_SIG_STEP_X = 24;
-const DEFAULT_BASS_OFFSET = 320;
+const DEFAULT_BASS_OFFSET = 310;
 
 const COMPACT_LINE_SPACING = 16;
-const COMPACT_STAFF_PADDING = 60;
+const COMPACT_STAFF_PADDING = 70;
 const COMPACT_CLEF_X = 15;
 const COMPACT_SIG_START_X = 70;
 const COMPACT_SIG_STEP_X = 16;
-const COMPACT_BASS_OFFSET = 200;
+const COMPACT_BASS_OFFSET = 190;
 
 // Map note names to vertical positions on the staff
 const getNoteY = (pitch: string, clef: 'treble' | 'bass', padding: number, spacing: number): number => {
@@ -95,7 +95,7 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
   const SIG_START_X = isCompact ? COMPACT_SIG_START_X : DEFAULT_SIG_START_X;
   const SIG_STEP_X = isCompact ? COMPACT_SIG_STEP_X : DEFAULT_SIG_STEP_X;
   const BASS_OFFSET = isCompact ? COMPACT_BASS_OFFSET : DEFAULT_BASS_OFFSET;
-  const canvasHeight = isCompact ? 400 : 640;
+  const canvasHeight = isCompact ? 420 : 670;
 
   // Colors based on dark mode
   const lineStrokeColor = isDarkMode ? 'rgba(255, 255, 255, 0.25)' : '#333333';
@@ -327,13 +327,13 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
   }, [notes, currentBeat, isCompact, keySignature, LINE_SPACING, STEP_SPACING, STAFF_PADDING, BASS_OFFSET, isDarkMode]);
 
   return (
-    <div className={`w-full md:h-full flex items-center justify-center transition-colors duration-500 rounded-xl shadow-inner overflow-hidden border relative ${isCompact ? 'aspect-[1000/400]' : 'aspect-[1000/640]'} md:aspect-auto ${isDarkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-neutral-200'}`}>
+    <div className={`w-full md:h-full flex items-center justify-center transition-colors duration-500 rounded-xl shadow-inner overflow-hidden border relative ${isCompact ? 'aspect-[1000/420]' : 'aspect-[1000/670]'} md:aspect-auto ${isDarkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-neutral-200'}`}>
       <canvas
         key={`bg-${isDarkMode ? 'dark' : 'light'}`}
         ref={bgCanvasRef}
         width={1000}
         height={canvasHeight}
-        className="absolute inset-0 w-full h-full max-w-[1000px] max-h-[640px] m-auto object-contain pointer-events-none"
+        className="absolute inset-0 w-full h-full max-w-[1000px] max-h-[670px] m-auto object-contain pointer-events-none"
       />
       {children}
       <AnimatePresence mode="popLayout">
@@ -350,7 +350,7 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
             ref={fgCanvasRef}
             width={1000}
             height={canvasHeight}
-            className="w-full h-full max-w-[1000px] max-h-[640px] m-auto object-contain pointer-events-none"
+            className="w-full h-full max-w-[1000px] max-h-[670px] m-auto object-contain pointer-events-none"
           />
         </motion.div>
       </AnimatePresence>

@@ -302,7 +302,14 @@ export default function App() {
   const [measureId, setMeasureId] = useState(0);
   const [activePianoNotes, setActivePianoNotes] = useState<Map<string, 'hit' | 'miss' | 'default'>>(new Map());
   const [feedback, setFeedback] = useState<{ type: 'hit' | 'miss', id: number, message?: string } | null>(null);
-  const [keyChangeAlert, setKeyChangeAlert] = useState<{ id: number; keyName: string } | null>(null);
+  const [keyChangeAlert, setKeyChangeAlert] = useState<{
+    id: number;
+    keyName: string;
+    prevKeyName?: string;
+    prevKeyPace?: number | null;
+    isNewRecord?: boolean;
+    duration?: number;
+  } | null>(null);
   const [startTime, setStartTime] = useState<string | null>(null);
   const [startDateTime, setStartDateTime] = useState<Date | null>(null);
   const [elapsedMinutes, setElapsedMinutes] = useState<number>(0);
@@ -312,6 +319,7 @@ export default function App() {
   });
   const [correctHits, setCorrectHits] = useState<number>(0);
   const [currentPace, setCurrentPace] = useState<number | null>(null);
+  const [sessionBeatenKeys, setSessionBeatenKeys] = useState<Set<string>>(new Set());
   const [highScores, setHighScores] = useState<Record<string, number>>(() => {
     const saved = localStorage.getItem('piano_pace_high_scores');
     if (saved) {
@@ -329,6 +337,8 @@ export default function App() {
   const activeDurationMsRef = useRef<number>(0);
   const isPlayingRef = useRef<boolean>(false);
   const correctHitsRef = useRef<number>(0);
+  const segmentStartHitsRef = useRef<number>(0);
+  const segmentStartDurationMsRef = useRef<number>(0);
 
   useEffect(() => {
     startDateTimeRef.current = startDateTime;
@@ -488,23 +498,35 @@ export default function App() {
     localStorage.setItem('piano_sound_enabled', String(soundEnabled));
   }, [soundEnabled]);
 
-  useEffect(() => {
-    // Reset session-specific pace variables on parameter changes
-    setCorrectHits(0);
+  const resetSegmentPace = useCallback(() => {
+    segmentStartHitsRef.current = correctHitsRef.current;
+    segmentStartDurationMsRef.current = activeDurationMsRef.current;
     setCurrentPace(null);
-  }, [selectedKeySignature, maxNotesPerSpawn, ledgerLines, useAccidentals]);
+  }, []);
+
+  useEffect(() => {
+    // Reset segment-specific pace variables on parameter changes
+    resetSegmentPace();
+  }, [selectedKeySignature, maxNotesPerSpawn, ledgerLines, useAccidentals, resetSegmentPace]);
 
   const calculateAndSavePace = useCallback(() => {
     const startDateTimeVal = startDateTimeRef.current;
     if (!startDateTimeVal) return;
-    const elapsedSecs = activeDurationMsRef.current / 1000;
-    if (elapsedSecs < 1) return; // Prevent dividing by extremely short times
 
-    // Pace = correct notes per minute (NPM)
-    const pace = (correctHitsRef.current * 60) / elapsedSecs;
+    const segmentHits = correctHitsRef.current - segmentStartHitsRef.current;
+    const segmentDurationMs = activeDurationMsRef.current - segmentStartDurationMsRef.current;
+    const segmentDurationSecs = segmentDurationMs / 1000;
+
+    if (segmentDurationSecs < 1 || segmentHits <= 0) {
+      setCurrentPace(null);
+      return;
+    }
+
+    // Pace = correct notes per minute (NPM) for current segment
+    const pace = (segmentHits * 60) / segmentDurationSecs;
     setCurrentPace(pace);
 
-    // Update record if beaten
+    // Update record if beaten for current config
     const currentRecord = highScores[configKey] || 0;
     if (pace > currentRecord) {
       const nextHighScores = {
@@ -513,6 +535,11 @@ export default function App() {
       };
       setHighScores(nextHighScores);
       localStorage.setItem('piano_pace_high_scores', JSON.stringify(nextHighScores));
+      setSessionBeatenKeys(prev => {
+        const next = new Set(prev);
+        next.add(configKey);
+        return next;
+      });
     }
   }, [configKey, highScores]);
 
@@ -609,9 +636,10 @@ export default function App() {
 
   useEffect(() => {
     if (keyChangeAlert) {
+      const duration = keyChangeAlert.duration || 4500;
       const timer = setTimeout(() => {
         setKeyChangeAlert(null);
-      }, 2000);
+      }, duration);
       return () => clearTimeout(timer);
     }
   }, [keyChangeAlert]);
@@ -636,11 +664,17 @@ export default function App() {
       const randomKey = keys[Math.floor(Math.random() * keys.length)];
       activeKeySignatureRef.current = randomKey;
       setActiveKeySignature(randomKey);
-      setKeyChangeAlert({ id: Date.now(), keyName: `Losowa tonacja: ${randomKey}` });
+      segmentStartHitsRef.current = correctHitsRef.current;
+      segmentStartDurationMsRef.current = activeDurationMsRef.current;
+      setCurrentPace(null);
+      setKeyChangeAlert({ id: Date.now(), keyName: `Losowa tonacja: ${randomKey}`, duration: 3500 });
     } else {
       activeKeySignatureRef.current = val;
       setActiveKeySignature(val);
-      setKeyChangeAlert({ id: Date.now(), keyName: val });
+      segmentStartHitsRef.current = correctHitsRef.current;
+      segmentStartDurationMsRef.current = activeDurationMsRef.current;
+      setCurrentPace(null);
+      setKeyChangeAlert({ id: Date.now(), keyName: val, duration: 2500 });
     }
   }, []);
 
@@ -656,10 +690,47 @@ export default function App() {
         const availableKeys = keys.filter(k => k !== currentKey);
         const randomKey = availableKeys[Math.floor(Math.random() * availableKeys.length)];
         
+        if (needsChange) {
+          const finishedKey = currentKey;
+          const finishedConfigKey = `${finishedKey}_${maxNotesPerSpawn}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
+          const hitsInKey = correctHitsRef.current - segmentStartHitsRef.current;
+          const durationInKeyMs = activeDurationMsRef.current - segmentStartDurationMsRef.current;
+          const durationInKeySecs = durationInKeyMs / 1000;
+
+          let keyPace: number | null = null;
+          let isNewRecord = false;
+
+          if (durationInKeySecs >= 1 && hitsInKey > 0) {
+            keyPace = (hitsInKey * 60) / durationInKeySecs;
+            const previousRecord = highScores[finishedConfigKey] || 0;
+            if (keyPace > previousRecord) {
+              isNewRecord = true;
+              const nextHighScores = { ...highScores, [finishedConfigKey]: keyPace };
+              setHighScores(nextHighScores);
+              localStorage.setItem('piano_pace_high_scores', JSON.stringify(nextHighScores));
+              setSessionBeatenKeys(prev => new Set(prev).add(finishedConfigKey));
+            }
+          }
+
+          setKeyChangeAlert({
+            id: Date.now(),
+            keyName: randomKey,
+            prevKeyName: finishedKey,
+            prevKeyPace: keyPace,
+            isNewRecord,
+            duration: 5000
+          });
+        } else {
+          setKeyChangeAlert({ id: Date.now(), keyName: `Losowa tonacja: ${randomKey}`, duration: 3500 });
+        }
+
         currentKey = randomKey;
         activeKeySignatureRef.current = randomKey;
         setActiveKeySignature(randomKey);
-        setKeyChangeAlert({ id: Date.now(), keyName: randomKey });
+
+        segmentStartHitsRef.current = correctHitsRef.current;
+        segmentStartDurationMsRef.current = activeDurationMsRef.current;
+        setCurrentPace(null);
       }
     }
     
@@ -900,7 +971,12 @@ export default function App() {
     if (matchingNote) {
       status = 'hit';
       setScore(s => s + 10);
-      setCorrectHits(c => c + 1);
+      setCorrectHits(c => {
+        const next = c + 1;
+        correctHitsRef.current = next;
+        calculateAndSavePace();
+        return next;
+      });
       setFeedback({ type: 'hit', id: Date.now(), message: 'PERFECT!' });
 
       notesRef.current = currentNotes.map(n => 
@@ -963,10 +1039,14 @@ export default function App() {
     setStartDateTime(null);
     setElapsedMinutes(0);
     setActiveDurationMs(0);
+    activeDurationMsRef.current = 0;
     setActivePianoNotes(new Map());
     lastPressBeatRef.current = 0;
     measuresPlayedRef.current = 0;
     setCorrectHits(0);
+    correctHitsRef.current = 0;
+    segmentStartHitsRef.current = 0;
+    segmentStartDurationMsRef.current = 0;
     setCurrentPace(null);
   };
 
@@ -1010,7 +1090,11 @@ export default function App() {
               >
                 <Trophy size={11} className="text-amber-500 group-hover:scale-110 transition-transform" />
                 <span>Rekord dla parametrów:</span>
-                <strong className="text-emerald-600 dark:text-emerald-400 font-extrabold">
+                <strong className={`font-extrabold ${
+                  sessionBeatenKeys.has(configKey)
+                    ? 'text-emerald-600 dark:text-emerald-400 animate-pulse'
+                    : (isDarkMode ? 'text-zinc-200' : 'text-neutral-800')
+                }`}>
                   {configRecord > 0 ? `${configRecord.toFixed(1)} NPM` : '—'}
                 </strong>
               </button>
@@ -1095,6 +1179,18 @@ export default function App() {
             <span className={`font-mono font-bold ${isCompact ? 'text-xs' : 'text-sm'}`}>{score}</span>
           </div>
 
+          {/* Exercise Duration badge (positioned in top header so it never obscures staff notes) */}
+          {startTime && (
+            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full shadow-sm border transition-all text-xs ${
+              isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-300' : 'bg-white border-neutral-200 text-neutral-700'
+            }`}>
+              <Clock size={isCompact ? 12 : 14} className="text-blue-500 shrink-0" />
+              <span className="font-medium whitespace-nowrap">
+                {startTime} <span className="opacity-75">({elapsedMinutes} min)</span>
+              </span>
+            </div>
+          )}
+
           <button 
             onClick={() => {
               if (isPlaying) {
@@ -1104,6 +1200,7 @@ export default function App() {
                 setStartDateTime(null);
                 setElapsedMinutes(0);
                 setActiveDurationMs(0);
+                activeDurationMsRef.current = 0;
               } else {
                 if (!startTime) {
                   const now = new Date();
@@ -1111,6 +1208,12 @@ export default function App() {
                   setStartDateTime(now);
                   setElapsedMinutes(0);
                   setActiveDurationMs(0);
+                  activeDurationMsRef.current = 0;
+                  setCorrectHits(0);
+                  correctHitsRef.current = 0;
+                  segmentStartHitsRef.current = 0;
+                  segmentStartDurationMsRef.current = 0;
+                  setCurrentPace(null);
                   measuresPlayedRef.current = 0;
                   generateMeasure();
                 }
@@ -1210,22 +1313,51 @@ export default function App() {
                 animate={{ opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }}
                 exit={{ opacity: 0, scale: 0.85, y: 15, filter: 'blur(4px)' }}
                 transition={{ type: 'spring', damping: 14, stiffness: 120 }}
-                className="absolute inset-x-4 top-1/2 -translate-y-1/2 p-4 md:p-5 rounded-2xl bg-amber-500/95 backdrop-blur-md shadow-[0_20px_50px_rgba(245,158,11,0.35)] border border-amber-300 z-30 flex items-center justify-between gap-4 max-w-sm md:max-w-md mx-auto"
+                className="absolute inset-x-4 top-1/2 -translate-y-1/2 p-4 md:p-5 rounded-2xl bg-amber-500/95 backdrop-blur-md shadow-[0_20px_50px_rgba(245,158,11,0.35)] border border-amber-300 z-30 flex flex-col items-start gap-2 max-w-sm md:max-w-md mx-auto"
               >
-                <div className="flex items-center gap-3">
-                  <div className="p-2 md:p-2.5 bg-white/20 rounded-xl text-white">
-                    <Music className="w-5 h-5 md:w-6 md:h-6 animate-bounce" />
+                <div className="flex items-center justify-between gap-3 w-full">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 md:p-2.5 bg-white/20 rounded-xl text-white shrink-0">
+                      <Music className="w-5 h-5 md:w-6 md:h-6 animate-bounce" />
+                    </div>
+                    <div className="flex flex-col text-left">
+                      <span className="text-[9px] md:text-[10px] uppercase font-bold tracking-widest text-amber-100">
+                        Zmiana Tonacji
+                      </span>
+                      <span className="text-base md:text-xl font-extrabold text-white leading-tight">
+                        {keyChangeAlert.keyName}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex flex-col text-left">
-                    <span className="text-[9px] md:text-[10px] uppercase font-bold tracking-widest text-amber-100">Zmiana Tonacji</span>
-                    <span className="text-base md:text-xl font-extrabold text-white leading-tight">
-                      {keyChangeAlert.keyName}
-                    </span>
+                  <div className="shrink-0 text-right bg-white/20 text-white rounded-full px-2.5 py-1 text-[10px] md:text-xs font-bold uppercase tracking-wider">
+                    ZMIANA
                   </div>
                 </div>
-                <div className="shrink-0 text-right bg-white/20 text-white rounded-full px-2.5 py-1 text-[10px] md:text-xs font-bold uppercase tracking-wider">
-                  ZMIANA
-                </div>
+
+                {/* Finishing Key Performance Summary */}
+                {keyChangeAlert.prevKeyName && (
+                  <div className="w-full mt-1 pt-2 border-t border-amber-300/40 flex flex-col gap-1 text-xs text-amber-50">
+                    <div className="flex items-center justify-between text-[11px] md:text-xs">
+                      <span>Kończąca się tonacja:</span>
+                      <strong className="text-white font-bold">{keyChangeAlert.prevKeyName}</strong>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] md:text-xs mt-0.5">
+                      <span>Zdobyta prędkość:</span>
+                      <div className="flex items-center gap-1.5">
+                        <strong className="text-white font-mono font-extrabold">
+                          {keyChangeAlert.prevKeyPace !== undefined && keyChangeAlert.prevKeyPace !== null
+                            ? `${keyChangeAlert.prevKeyPace.toFixed(1)} NPM`
+                            : '—'}
+                        </strong>
+                        {keyChangeAlert.isNewRecord && (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-400 text-black text-[10px] font-black uppercase tracking-wider animate-pulse shadow-xs">
+                            🏆 NOWY REKORD!
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </motion.div>
             )}
           </AnimatePresence>
@@ -1234,15 +1366,6 @@ export default function App() {
         {/* Piano Section */}
         <section className="w-full relative shrink-0">
           <Piano onNotePress={handlePianoPress} activeNotes={activePianoNotes} ledgerLines={ledgerLines} isCompact={isCompact} isDarkMode={isDarkMode} />
-          
-          {startTime && (
-            <div className={`absolute -top-8 left-4 flex items-center gap-2 px-3 py-1.5 rounded-full border shadow-xs transition-all animate-in fade-in slide-in-from-bottom-2 duration-700 z-10 ${
-              isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-300' : 'bg-white border-neutral-200/80 text-neutral-700'
-            }`}>
-              <Clock size={14} className="text-blue-500" />
-              <span className="text-xs font-medium">Rozpoczęto o: <strong className={`font-semibold ${isDarkMode ? 'text-zinc-100' : 'text-neutral-900'}`}>{startTime} ({elapsedMinutes} min)</strong></span>
-            </div>
-          )}
         </section>
       </main>
 
@@ -1714,12 +1837,15 @@ export default function App() {
                     .map(([key, scoreVal]) => {
                       const parsed = parseConfigKey(key);
                       const isCurrentConfig = key === configKey;
+                      const isBeatenInSession = sessionBeatenKeys.has(key);
 
                       return (
                         <div
                           key={key}
                           className={`p-3 rounded-xl border flex justify-between items-center transition-all gap-3 ${
-                            isCurrentConfig
+                            isBeatenInSession
+                              ? (isDarkMode ? 'bg-emerald-950/20 border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.1)]' : 'bg-emerald-50/90 border-emerald-300')
+                              : isCurrentConfig
                               ? (isDarkMode ? 'bg-amber-950/25 border-amber-500/50' : 'bg-amber-50/80 border-amber-300')
                               : (isDarkMode ? 'bg-zinc-950/40 border-zinc-800/80 hover:bg-zinc-950/80' : 'bg-neutral-50/50 border-neutral-200/80 hover:bg-neutral-50')
                           }`}
@@ -1732,6 +1858,11 @@ export default function App() {
                               {isCurrentConfig && (
                                 <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-500 text-black">
                                   Aktualne ustawienia
+                                </span>
+                              )}
+                              {isBeatenInSession && (
+                                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-500 text-black animate-pulse">
+                                  Pobity w tej sesji!
                                 </span>
                               )}
                             </div>
@@ -1758,7 +1889,11 @@ export default function App() {
                           <div className="flex items-center gap-3 shrink-0">
                             <div className="flex flex-col items-end">
                               <span className="text-[10px] uppercase font-bold text-neutral-400 dark:text-zinc-500 tracking-wider">Rekord</span>
-                              <span className="text-sm font-mono font-black text-emerald-600 dark:text-emerald-400">
+                              <span className={`text-sm font-mono font-black ${
+                                isBeatenInSession
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : (isDarkMode ? 'text-zinc-200' : 'text-neutral-800')
+                              }`}>
                                 {scoreVal.toFixed(1)} NPM
                               </span>
                             </div>
