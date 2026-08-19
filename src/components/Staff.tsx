@@ -263,26 +263,19 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
       }
     }
 
+    // 1. Draw stems and ledger lines first
     notes.forEach(note => {
-      ctx.globalAlpha = note.isHit ? 0.2 : 1.0;
+      const isPastBeat = note.beatIndex < currentBeat;
+      const isHit = !!note.isHit;
+      const hitGreenColor = isDarkMode ? '#4ade80' : '#16a34a';
+
+      ctx.globalAlpha = isPastBeat ? 0.3 : 1.0;
 
       const yBase = note.clef === 'treble' ? 0 : BASS_OFFSET;
       const y = yBase + getNoteY(note.displayPitch, note.clef, STAFF_PADDING, LINE_SPACING);
-      
-      ctx.fillStyle = primaryNoteColor;
-      ctx.strokeStyle = primaryNoteColor;
-      
-      ctx.lineWidth = 2;
-      
-      const headW = isCompact ? 9 : 13;
-      const headH = isCompact ? 6 : 9;
-
-      // Scaled note head
-      ctx.beginPath();
-      ctx.ellipse(note.x, y, headW, headH, Math.PI / -6, 0, Math.PI * 2);
-      ctx.fill();
 
       // Stem
+      ctx.strokeStyle = isHit ? hitGreenColor : primaryNoteColor;
       ctx.lineWidth = isCompact ? 1.2 : 1.8;
       ctx.beginPath();
       const stemXOffset = isCompact ? 8 : 12;
@@ -295,7 +288,6 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
       ctx.strokeStyle = ledgerLineColor;
       const staffTopLine = yBase + STAFF_PADDING;
       const staffBottomLine = yBase + STAFF_PADDING + 4 * LINE_SPACING;
-      
       const ledgerW = isCompact ? 14 : 21;
 
       if (y <= staffTopLine - STEP_SPACING) {
@@ -314,9 +306,47 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
         }
       }
 
+      ctx.globalAlpha = 1.0;
+    });
+
+    // 2. Draw noteheads and accidentals on top so green hit notes stand out clearly
+    notes.forEach(note => {
+      const isPastBeat = note.beatIndex < currentBeat;
+      const isHit = !!note.isHit;
+
+      const hitGreenColor = isDarkMode ? '#4ade80' : '#16a34a';
+      const currentNoteColor = isHit ? hitGreenColor : primaryNoteColor;
+      const currentAccidentalColor = isHit ? hitGreenColor : primaryNoteColor;
+
+      ctx.globalAlpha = isPastBeat ? 0.3 : 1.0;
+
+      const yBase = note.clef === 'treble' ? 0 : BASS_OFFSET;
+      const y = yBase + getNoteY(note.displayPitch, note.clef, STAFF_PADDING, LINE_SPACING);
+
+      // Glowing green halo for correctly guessed notes
+      if (isHit) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(note.x, y, isCompact ? 14 : 20, 0, Math.PI * 2);
+        ctx.fillStyle = isDarkMode ? 'rgba(74, 222, 128, 0.35)' : 'rgba(22, 163, 74, 0.25)';
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Scaled note head
+      ctx.fillStyle = currentNoteColor;
+      ctx.strokeStyle = currentNoteColor;
+      ctx.lineWidth = 2;
+      const headW = isCompact ? 9 : 13;
+      const headH = isCompact ? 6 : 9;
+
+      ctx.beginPath();
+      ctx.ellipse(note.x, y, headW, headH, Math.PI / -6, 0, Math.PI * 2);
+      ctx.fill();
+
       // Accidental sign
       if (note.accidental) {
-        ctx.fillStyle = primaryNoteColor;
+        ctx.fillStyle = currentAccidentalColor;
         ctx.font = `bold ${isCompact ? 36 : 54}px serif`;
         ctx.fillText(note.accidental, note.x - (isCompact ? 34 : 51), y + (isCompact ? 12 : 18));
       }

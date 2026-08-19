@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 interface PianoProps {
   onNotePress: (note: string) => void;
-  activeNotes: Map<string, 'hit' | 'miss' | 'default'>;
+  activeNotes: Map<string, 'hit' | 'miss' | 'wrong-octave' | 'default'>;
   ledgerLines: number;
   isCompact?: boolean;
   isDarkMode?: boolean;
@@ -14,7 +14,7 @@ const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 interface KeyButtonProps {
   keyName: string;
   isBlack: boolean;
-  status: 'hit' | 'miss' | 'default' | undefined;
+  status: 'hit' | 'miss' | 'wrong-octave' | 'default' | undefined;
   onClick: () => void;
   isDarkMode: boolean;
   className: string;
@@ -32,7 +32,7 @@ const KeyButton: React.FC<KeyButtonProps> = ({
   style,
   children
 }) => {
-  const [prevStatus, setPrevStatus] = useState<'hit' | 'miss' | 'default' | undefined>(status);
+  const [prevStatus, setPrevStatus] = useState<'hit' | 'miss' | 'wrong-octave' | 'default' | undefined>(status);
   const [clearingState, setClearingState] = useState<{
     id: number;
     colorClass: string;
@@ -44,6 +44,7 @@ const KeyButton: React.FC<KeyButtonProps> = ({
     if (prevStatus && !status) {
       let colorClass = 'bg-blue-400';
       if (prevStatus === 'hit') colorClass = 'bg-green-500';
+      if (prevStatus === 'wrong-octave') colorClass = 'bg-amber-500';
       if (prevStatus === 'miss') colorClass = 'bg-red-500';
 
       setClearingState({
@@ -65,6 +66,7 @@ const KeyButton: React.FC<KeyButtonProps> = ({
 
   let activeColorBg = '';
   if (status === 'hit') activeColorBg = 'bg-green-500';
+  else if (status === 'wrong-octave') activeColorBg = 'bg-amber-500';
   else if (status === 'miss') activeColorBg = 'bg-red-500';
   else if (status === 'default') activeColorBg = 'bg-blue-400';
 

@@ -8,7 +8,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Piano } from './components/Piano';
 import { Staff } from './components/Staff';
 import { audioService } from './services/audioService';
-import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock, Sun, Moon, Volume2, VolumeX, TrendingUp, History, Calendar, Trash2, X, SlidersHorizontal, Plus, ChevronDown, ChevronUp } from 'lucide-react';
+import { audioInputService, AudioInputStatus } from './services/audioInputService';
+import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock, Sun, Moon, Volume2, VolumeX, TrendingUp, History, Calendar, Trash2, X, SlidersHorizontal, Plus, ChevronDown, ChevronUp, Mic, MicOff, Radio, SkipForward, Lightbulb, HelpCircle, Info, CheckCircle2 } from 'lucide-react';
 
 interface Note {
   id: number;
@@ -49,6 +50,11 @@ const KEY_SIGNATURES = {
 };
 
 const NOTE_NAMES = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+const CHROMATIC_NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+const ALL_CALIBRATION_PITCHES = Array.from({ length: 6 }, (_, i) => i + 1).flatMap(octave =>
+  CHROMATIC_NOTE_NAMES.map(note => `${note}${octave}`)
+);
 
 const getNotePool = (clef: 'treble' | 'bass', ledgerLines: number) => {
   const pool: string[] = [];
@@ -300,8 +306,8 @@ export default function App() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [currentBeat, setCurrentBeat] = useState(0);
   const [measureId, setMeasureId] = useState(0);
-  const [activePianoNotes, setActivePianoNotes] = useState<Map<string, 'hit' | 'miss' | 'default'>>(new Map());
-  const [feedback, setFeedback] = useState<{ type: 'hit' | 'miss', id: number, message?: string } | null>(null);
+  const [activePianoNotes, setActivePianoNotes] = useState<Map<string, 'hit' | 'miss' | 'wrong-octave' | 'default'>>(new Map());
+  const [feedback, setFeedback] = useState<{ type: 'hit' | 'miss' | 'wrong-octave', id: number, message?: string } | null>(null);
   const [keyChangeAlert, setKeyChangeAlert] = useState<{
     id: number;
     keyName: string;
@@ -332,6 +338,103 @@ export default function App() {
     return {};
   });
 
+  const [audioInputStatus, setAudioInputStatus] = useState<AudioInputStatus>({
+    isMidiConnected: false,
+    midiDeviceName: null,
+    isMicActive: false,
+    detectedPitch: null,
+    detectedFrequency: null,
+    volumeLevel: 0,
+    micError: null
+  });
+  const [showAudioInputModal, setShowAudioInputModal] = useState<boolean>(false);
+
+  // Pitch Calibration & Remapping State
+  const [transposeOffset, setTransposeOffset] = useState<number>(() => {
+    const saved = localStorage.getItem('piano_transpose_offset');
+    return saved !== null ? parseInt(saved, 10) : 0;
+  });
+
+  const [customPitchMap, setCustomPitchMap] = useState<Record<string, string>>(() => {
+    const saved = localStorage.getItem('piano_custom_pitch_map');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return {};
+      }
+    }
+    return {};
+  });
+
+  const [calibrationDetectedInput, setCalibrationDetectedInput] = useState<string>('C4');
+  const [calibrationTargetOutput, setCalibrationTargetOutput] = useState<string>('C4');
+  const [isCapturingInput, setIsCapturingInput] = useState<boolean>(false);
+  const [showCalibrationHelp, setShowCalibrationHelp] = useState<boolean>(true);
+
+  useEffect(() => {
+    localStorage.setItem('piano_transpose_offset', transposeOffset.toString());
+  }, [transposeOffset]);
+
+  useEffect(() => {
+    localStorage.setItem('piano_custom_pitch_map', JSON.stringify(customPitchMap));
+  }, [customPitchMap]);
+
+  useEffect(() => {
+    if (isCapturingInput && audioInputStatus.detectedPitch) {
+      setCalibrationDetectedInput(audioInputStatus.detectedPitch);
+    }
+  }, [isCapturingInput, audioInputStatus.detectedPitch]);
+
+  const remapPitch = useCallback((rawPitch: string): string => {
+    if (!rawPitch) return rawPitch;
+
+    // 1. Direct custom remapping rule
+    if (customPitchMap[rawPitch]) {
+      return customPitchMap[rawPitch];
+    }
+
+    // 2. Transpose offset in semitones
+    if (transposeOffset !== 0) {
+      const noteName = rawPitch.replace(/-?\d+$/, '');
+      const octMatch = rawPitch.match(/-?\d+$/);
+      const octave = parseInt(octMatch ? octMatch[0] : '4', 10);
+      const idx = CHROMATIC_NOTE_NAMES.indexOf(noteName);
+      if (idx !== -1) {
+        const midi = (octave + 1) * 12 + idx + transposeOffset;
+        if (midi >= 0 && midi <= 127) {
+          const newNoteName = CHROMATIC_NOTE_NAMES[midi % 12];
+          const newOctave = Math.floor(midi / 12) - 1;
+          return `${newNoteName}${newOctave}`;
+        }
+      }
+    }
+
+    return rawPitch;
+  }, [transposeOffset, customPitchMap]);
+
+  const handleAddCalibrationRule = () => {
+    if (!calibrationDetectedInput || !calibrationTargetOutput) return;
+    setCustomPitchMap(prev => ({
+      ...prev,
+      [calibrationDetectedInput]: calibrationTargetOutput
+    }));
+    setIsCapturingInput(false);
+  };
+
+  const handleRemoveCalibrationRule = (detected: string) => {
+    setCustomPitchMap(prev => {
+      const next = { ...prev };
+      delete next[detected];
+      return next;
+    });
+  };
+
+  const handleResetCalibration = () => {
+    setTransposeOffset(0);
+    setCustomPitchMap({});
+  };
+
   const startDateTimeRef = useRef<Date | null>(null);
   const scoreRef = useRef<number>(0);
   const activeDurationMsRef = useRef<number>(0);
@@ -347,6 +450,38 @@ export default function App() {
     isPlayingRef.current = isPlaying;
     correctHitsRef.current = correctHits;
   }, [startDateTime, score, activeDurationMs, isPlaying, correctHits]);
+
+  // Screen Wake Lock API to prevent screen dimming/sleeping when mic is active or session is playing
+  useEffect(() => {
+    let wakeLockSentinel: any = null;
+
+    const requestWakeLock = async () => {
+      if ('wakeLock' in navigator && (audioInputStatus.isMicActive || isPlaying)) {
+        try {
+          wakeLockSentinel = await (navigator as any).wakeLock.request('screen');
+        } catch (err) {
+          // Ignore error if wake lock fails or is unsupported/rejected
+        }
+      }
+    };
+
+    requestWakeLock();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && (audioInputStatus.isMicActive || isPlaying)) {
+        requestWakeLock();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (wakeLockSentinel) {
+        wakeLockSentinel.release().catch(() => {});
+      }
+    };
+  }, [audioInputStatus.isMicActive, isPlaying]);
 
   useEffect(() => {
     const handleUnload = () => {
@@ -647,6 +782,7 @@ export default function App() {
   const notesRef = useRef<Note[]>([]);
   const currentBeatRef = useRef<number>(0);
   const lastPressBeatRef = useRef<number>(0);
+  const wrongPitchesInCurrentBeatRef = useRef<{ beat: number; pitches: Set<string> }>({ beat: 0, pitches: new Set() });
 
   useEffect(() => {
     const mql = window.matchMedia('(min-width: 768px) and (orientation: landscape)');
@@ -930,12 +1066,33 @@ export default function App() {
     }
   }, [generateMeasure, isPlaying]);
 
+const PITCH_CLASS_MAP: Record<string, number> = {
+  'C': 0, 'B#': 0,
+  'C#': 1, 'DB': 1,
+  'D': 2,
+  'D#': 3, 'EB': 3,
+  'E': 4, 'FB': 4,
+  'F': 5, 'E#': 5,
+  'F#': 6, 'GB': 6,
+  'G': 7,
+  'G#': 8, 'AB': 8,
+  'A': 9,
+  'A#': 10, 'BB': 10,
+  'B': 11, 'CB': 11,
+};
+
+const getPitchClass = (p: string): number | null => {
+  if (!p) return null;
+  const noteName = p.replace(/-?\d+$/, '').toUpperCase();
+  return PITCH_CLASS_MAP[noteName] ?? null;
+};
+
   const handlePianoPress = useCallback((pitch: string) => {
     if (soundEnabled) {
       audioService.playNote(pitch);
     }
     
-    let status: 'hit' | 'miss' | 'default' = 'default';
+    let status: 'hit' | 'miss' | 'wrong-octave' | 'default' = 'default';
 
     if (!isPlaying || showHistory) {
       setActivePianoNotes(prev => new Map(prev).set(pitch, 'default'));
@@ -949,6 +1106,11 @@ export default function App() {
 
     const currentNotes = notesRef.current;
     let beat = currentBeatRef.current;
+
+    // Reset wrong pitches tracking if we moved to a new beat
+    if (wrongPitchesInCurrentBeatRef.current.beat !== beat) {
+      wrongPitchesInCurrentBeatRef.current = { beat, pitches: new Set() };
+    }
     
     const notesInBeat = currentNotes.filter(n => n.beatIndex === beat);
     const unplayedInBeat = notesInBeat.filter(n => !n.isHit);
@@ -977,7 +1139,7 @@ export default function App() {
         calculateAndSavePace();
         return next;
       });
-      setFeedback({ type: 'hit', id: Date.now(), message: 'PERFECT!' });
+      setFeedback({ type: 'hit', id: Date.now(), message: 'Dobrze' });
 
       notesRef.current = currentNotes.map(n => 
         n.id === matchingNote.id ? { ...n, isHit: true } : n
@@ -1006,9 +1168,39 @@ export default function App() {
         }, 150);
       }
     } else {
-      status = 'miss';
-      setScore(s => Math.max(0, s - 5));
-      setFeedback({ type: 'miss', id: Date.now(), message: `Pressed ${pitch}` });
+      // Prevent duplicate penalties for the exact same wrong pitch on the current beat
+      if (wrongPitchesInCurrentBeatRef.current.pitches.has(pitch)) {
+        return;
+      }
+      wrongPitchesInCurrentBeatRef.current.pitches.add(pitch);
+
+      const pressedPitchClass = getPitchClass(pitch);
+      const wrongOctaveNote = pressedPitchClass !== null
+        ? unplayedInBeat.find(n => getPitchClass(n.actualPitch) === pressedPitchClass)
+        : undefined;
+
+      if (wrongOctaveNote) {
+        status = 'wrong-octave';
+        setScore(s => Math.max(0, s - 3));
+        setFeedback({ type: 'wrong-octave', id: Date.now(), message: 'Inna oktawa' });
+      } else {
+        status = 'miss';
+        setScore(s => Math.max(0, s - 5));
+        setFeedback({ type: 'miss', id: Date.now(), message: 'Nietrafione' });
+      }
+
+      // Auto-clear wrong key highlight after 450ms so keyboard stays clean while waiting
+      setTimeout(() => {
+        setActivePianoNotes(prev => {
+          const currentStatus = prev.get(pitch);
+          if (currentStatus === 'miss' || currentStatus === 'wrong-octave') {
+            const next = new Map(prev);
+            next.delete(pitch);
+            return next;
+          }
+          return prev;
+        });
+      }, 450);
     }
 
     setNotes([...notesRef.current]);
@@ -1026,6 +1218,43 @@ export default function App() {
       return next;
     });
   }, [isPlaying, generateMeasure, soundEnabled, showHistory, calculateAndSavePace]);
+
+  const skipCurrentBeat = useCallback(() => {
+    const beat = currentBeatRef.current;
+    
+    // Mark all notes in current beat as hit/skipped
+    notesRef.current = notesRef.current.map(n => 
+      n.beatIndex === beat ? { ...n, isHit: true } : n
+    );
+    setNotes([...notesRef.current]);
+    setActivePianoNotes(new Map());
+    wrongPitchesInCurrentBeatRef.current = { beat: beat + 1, pitches: new Set() };
+
+    if (beat < 3) {
+      currentBeatRef.current = beat + 1;
+      setCurrentBeat(beat + 1);
+    } else {
+      // Reached end of measure -> generate next measure
+      calculateAndSavePace();
+      generateMeasure();
+    }
+
+    setFeedback({ type: 'wrong-octave', id: Date.now(), message: 'Pominięto uderzenie' });
+  }, [calculateAndSavePace, generateMeasure]);
+
+  useEffect(() => {
+    audioInputService.setCallbacks(
+      (pitch) => {
+        const calibratedPitch = remapPitch(pitch);
+        handlePianoPress(calibratedPitch);
+      },
+      (status) => {
+        setAudioInputStatus(status);
+      }
+    );
+
+    audioInputService.initMidi();
+  }, [handlePianoPress, remapPitch]);
 
   const resetGame = () => {
     saveSessionToHistory();
@@ -1172,6 +1401,43 @@ export default function App() {
             {isCompact ? 'Tempo' : 'Śledzenie tempa'}: {showPaceTracker ? 'WŁ' : 'WYŁ'}
           </button>
 
+          {/* Audio / MIDI Input Listening Toggle Button */}
+          <button 
+            onClick={() => setShowAudioInputModal(true)}
+            className={`flex items-center gap-1.5 ${isCompact ? 'text-[10px] px-2 py-1' : 'text-xs md:text-sm px-3.5 py-1'} rounded-full border transition-all shadow-sm ${
+              audioInputStatus.isMicActive || audioInputStatus.isMidiConnected
+                ? (isDarkMode ? 'bg-emerald-950/60 border-emerald-500/60 text-emerald-300 ring-2 ring-emerald-500/20' : 'bg-emerald-50 border-emerald-400 text-emerald-800 ring-2 ring-emerald-300/40')
+                : (isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200' : 'bg-white border-neutral-200 text-neutral-600 hover:text-neutral-900')
+            }`}
+            title="Słuchanie pianina i kalibracja dźwięków (Mikrofon / MIDI)"
+          >
+            {audioInputStatus.isMicActive ? (
+              <span className="relative flex h-2.5 w-2.5 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+              </span>
+            ) : audioInputStatus.isMidiConnected ? (
+              <Radio size={isCompact ? 12 : 14} className="text-emerald-500 shrink-0" />
+            ) : (
+              <Mic size={isCompact ? 12 : 14} className="shrink-0" />
+            )}
+            <span className="font-semibold whitespace-nowrap">
+              {audioInputStatus.isMicActive
+                ? (isCompact ? 'Mic WŁ' : 'Słucham')
+                : audioInputStatus.isMidiConnected
+                ? (isCompact ? 'MIDI' : 'MIDI WŁ')
+                : (isCompact ? 'Słuchaj' : 'Słuchaj (Mic/MIDI)')}
+            </span>
+            {audioInputStatus.isMicActive && (
+              <span className="font-mono font-bold text-[11px] bg-emerald-500/20 text-emerald-400 dark:text-emerald-300 px-1 py-0.5 rounded min-w-[30px] inline-block text-center shrink-0">
+                {audioInputStatus.detectedPitch ? remapPitch(audioInputStatus.detectedPitch) : '—'}
+              </span>
+            )}
+            {(transposeOffset !== 0 || Object.keys(customPitchMap).length > 0) && (
+              <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" title="Kalibracja dźwięków jest aktywna" />
+            )}
+          </button>
+
           <div className={`flex items-center gap-2 px-3 py-1 rounded-full shadow-sm border transition-all ${
             isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-200' : 'bg-white border-neutral-200 text-neutral-900'
           }`}>
@@ -1278,6 +1544,28 @@ export default function App() {
 
         {/* Staff Section */}
         <section className={`relative md:flex-1 md:min-h-0 rounded-xl transition-all duration-500 w-full ${keyChangeAlert ? 'ring-4 ring-amber-400 shadow-[0_0_25px_rgba(245,158,11,0.45)]' : ''}`}>
+          {/* Feedback Pill - Centered on top border outside the canvas frame so it never obscures any notes */}
+          <AnimatePresence>
+            {feedback && (
+              <motion.div
+                key={feedback.id}
+                initial={{ opacity: 0, y: -6, scale: 0.9 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.9 }}
+                transition={{ type: 'spring', damping: 20, stiffness: 300 }}
+                className={`absolute -top-3.5 left-1/2 -translate-x-1/2 z-30 px-3 py-0.5 rounded-full text-xs font-bold shadow-md border pointer-events-none transition-all flex items-center gap-1.5 ${
+                  feedback.type === 'hit'
+                    ? 'bg-emerald-600 text-white border-emerald-400/50 shadow-emerald-500/20'
+                    : feedback.type === 'wrong-octave'
+                    ? 'bg-amber-500 text-white border-amber-300/50 shadow-amber-500/20'
+                    : 'bg-rose-600 text-white border-rose-400/50 shadow-rose-500/20'
+                }`}
+              >
+                <span>{feedback.message}</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <Staff 
             notes={notes}
             currentBeat={currentBeat}
@@ -1285,76 +1573,64 @@ export default function App() {
             isCompact={isCompact}
             measureId={measureId}
             isDarkMode={isDarkMode}
-          >
-            {/* Feedback Overlay */}
-            <AnimatePresence>
-              {feedback && (
-                <motion.div
-                  key={feedback.id}
-                  initial={{ opacity: 0, y: 10, scale: 0.8 }}
-                  animate={{ opacity: 1, y: -10, scale: 1.1 }}
-                  exit={{ opacity: 0 }}
-                  className={`absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 font-bold text-xl md:text-2xl z-0 flex flex-col items-center pointer-events-none drop-shadow-md ${
-                    feedback.type === 'hit' ? 'text-green-500' : 'text-red-500'
-                  }`}
-                >
-                  <span>{feedback.message}</span>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </Staff>
+          />
+
+          {/* Skip Button - allows skipping the current beat */}
+          {isPlaying && (
+            <button
+              onClick={skipCurrentBeat}
+              className={`absolute top-2.5 right-2.5 z-20 flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-md transition-all shadow-md border ${
+                isDarkMode
+                  ? 'bg-zinc-900/85 hover:bg-zinc-800 text-zinc-200 border-zinc-700/70 shadow-black/40'
+                  : 'bg-white/95 hover:bg-neutral-100 text-neutral-800 border-neutral-300 shadow-neutral-200/50'
+              }`}
+              title="Pomiń to uderzenie nut (np. zbyt duża rozpiętość lub brak klawisza)"
+            >
+              <SkipForward className="w-3.5 h-3.5 text-amber-500 fill-amber-500/20" />
+              <span>Pomiń uderzenie</span>
+            </button>
+          )}
 
           {/* Key Signature Change Announcement Overlay */}
           <AnimatePresence>
             {keyChangeAlert && (
               <motion.div
                 key={`keychange-${keyChangeAlert.id}`}
-                initial={{ opacity: 0, scale: 0.8, y: -15, filter: 'blur(4px)' }}
-                animate={{ opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }}
-                exit={{ opacity: 0, scale: 0.85, y: 15, filter: 'blur(4px)' }}
-                transition={{ type: 'spring', damping: 14, stiffness: 120 }}
-                className="absolute inset-x-4 top-1/2 -translate-y-1/2 p-4 md:p-5 rounded-2xl bg-amber-500/95 backdrop-blur-md shadow-[0_20px_50px_rgba(245,158,11,0.35)] border border-amber-300 z-30 flex flex-col items-start gap-2 max-w-sm md:max-w-md mx-auto"
+                initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                transition={{ type: 'spring', damping: 18, stiffness: 150 }}
+                className="absolute top-2 left-4 right-4 md:left-auto md:right-4 p-3 rounded-xl bg-amber-500/90 dark:bg-amber-600/90 text-white backdrop-blur-md shadow-lg border border-amber-300/50 z-30 flex flex-col gap-1.5 max-w-sm pointer-events-none"
               >
                 <div className="flex items-center justify-between gap-3 w-full">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 md:p-2.5 bg-white/20 rounded-xl text-white shrink-0">
-                      <Music className="w-5 h-5 md:w-6 md:h-6 animate-bounce" />
-                    </div>
-                    <div className="flex flex-col text-left">
-                      <span className="text-[9px] md:text-[10px] uppercase font-bold tracking-widest text-amber-100">
-                        Zmiana Tonacji
+                  <div className="flex items-center gap-2">
+                    <Music className="w-4 h-4 text-amber-100 shrink-0" />
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] uppercase font-bold tracking-wider text-amber-100">
+                        Tonacja:
                       </span>
-                      <span className="text-base md:text-xl font-extrabold text-white leading-tight">
+                      <span className="text-sm font-bold leading-none">
                         {keyChangeAlert.keyName}
                       </span>
                     </div>
-                  </div>
-                  <div className="shrink-0 text-right bg-white/20 text-white rounded-full px-2.5 py-1 text-[10px] md:text-xs font-bold uppercase tracking-wider">
-                    ZMIANA
                   </div>
                 </div>
 
                 {/* Finishing Key Performance Summary */}
                 {keyChangeAlert.prevKeyName && (
-                  <div className="w-full mt-1 pt-2 border-t border-amber-300/40 flex flex-col gap-1 text-xs text-amber-50">
-                    <div className="flex items-center justify-between text-[11px] md:text-xs">
-                      <span>Kończąca się tonacja:</span>
-                      <strong className="text-white font-bold">{keyChangeAlert.prevKeyName}</strong>
-                    </div>
-                    <div className="flex items-center justify-between text-[11px] md:text-xs mt-0.5">
-                      <span>Zdobyta prędkość:</span>
-                      <div className="flex items-center gap-1.5">
-                        <strong className="text-white font-mono font-extrabold">
-                          {keyChangeAlert.prevKeyPace !== undefined && keyChangeAlert.prevKeyPace !== null
-                            ? `${keyChangeAlert.prevKeyPace.toFixed(1)} NPM`
-                            : '—'}
-                        </strong>
-                        {keyChangeAlert.isNewRecord && (
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-400 text-black text-[10px] font-black uppercase tracking-wider animate-pulse shadow-xs">
-                            🏆 NOWY REKORD!
-                          </span>
-                        )}
-                      </div>
+                  <div className="w-full pt-1.5 border-t border-amber-300/30 flex items-center justify-between text-[11px] text-amber-50">
+                    <span>{keyChangeAlert.prevKeyName}:</span>
+                    <div className="flex items-center gap-1.5">
+                      <strong className="font-mono font-bold">
+                        {keyChangeAlert.prevKeyPace !== undefined && keyChangeAlert.prevKeyPace !== null
+                          ? `${keyChangeAlert.prevKeyPace.toFixed(1)} NPM`
+                          : '—'}
+                      </strong>
+                      {keyChangeAlert.isNewRecord && (
+                        <span className="px-1.5 py-0.2 rounded-full bg-emerald-400 text-black text-[9px] font-black uppercase tracking-wider">
+                          🏆 Rekord!
+                        </span>
+                      )}
                     </div>
                   </div>
                 )}
@@ -1953,6 +2229,460 @@ export default function App() {
                   )}
                 </div>
               )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Audio & MIDI Input Modal */}
+      <AnimatePresence>
+        {showAudioInputModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowAudioInputModal(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-xs"
+            />
+
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              className={`relative z-10 w-full max-w-lg p-6 rounded-2xl border shadow-2xl transition-colors max-h-[88vh] overflow-y-auto ${
+                isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-100' : 'bg-white border-neutral-200 text-neutral-900'
+              }`}
+            >
+              <div className="flex items-center justify-between pb-4 border-b border-zinc-800/20 dark:border-zinc-800">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-blue-500/10 text-blue-500">
+                    <Mic size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base">Słuchanie & Kalibracja Instrumentu</h3>
+                    <p className="text-xs text-neutral-500 dark:text-zinc-400">Mikrofon, USB MIDI i dopasowanie dźwięków</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowAudioInputModal(false)}
+                  className={`p-1.5 rounded-full transition-colors ${
+                    isDarkMode ? 'hover:bg-zinc-800 text-zinc-400' : 'hover:bg-neutral-100 text-neutral-500'
+                  }`}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-4">
+                {/* Microphone Section */}
+                <div className={`p-4 rounded-xl border transition-all ${
+                  audioInputStatus.isMicActive
+                    ? (isDarkMode ? 'bg-emerald-950/30 border-emerald-500/40' : 'bg-emerald-50/80 border-emerald-300')
+                    : (isDarkMode ? 'bg-zinc-950/40 border-zinc-800' : 'bg-neutral-50 border-neutral-200')
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      {audioInputStatus.isMicActive ? <Mic size={18} className="text-emerald-500" /> : <MicOff size={18} className="text-neutral-400" />}
+                      <span className="font-semibold text-sm">Mikrofon (Detekcja dźwięku)</span>
+                    </div>
+
+                    <button
+                      onClick={async () => {
+                        if (audioInputStatus.isMicActive) {
+                          audioInputService.stopMicrophone();
+                        } else {
+                          await audioInputService.startMicrophone();
+                        }
+                      }}
+                      className={`px-3 py-1 text-xs font-bold rounded-full transition-all ${
+                        audioInputStatus.isMicActive
+                          ? 'bg-red-500 text-white hover:bg-red-600'
+                          : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                      }`}
+                    >
+                      {audioInputStatus.isMicActive ? 'Wyłącz' : 'Włącz mikrofon'}
+                    </button>
+                  </div>
+
+                  <p className="text-xs text-neutral-500 dark:text-zinc-400 leading-relaxed mb-3">
+                    Graj na prawdziwym pianinie lub keyboardzie. Mikrofon wykryje częstotliwość i automatycznie rozpozna zagraną nutę.
+                  </p>
+
+                  {audioInputStatus.micError && (
+                    <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-500 text-xs mb-2">
+                      ⚠️ {audioInputStatus.micError}
+                    </div>
+                  )}
+
+                  {audioInputStatus.isMicActive && (
+                    <div className="space-y-2 pt-2 border-t border-emerald-500/20">
+                      {/* Audio Level Visualizer Bar */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold uppercase text-neutral-400 dark:text-zinc-500">Sygnał:</span>
+                        <div className="flex-1 h-2 rounded-full bg-neutral-200 dark:bg-zinc-800 overflow-hidden">
+                          <div
+                            className="h-full bg-emerald-500 transition-all duration-75"
+                            style={{ width: `${Math.min(100, audioInputStatus.volumeLevel * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Pitch Feedback */}
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-neutral-500 dark:text-zinc-400">Wykryta nuta surowa:</span>
+                        <span className="font-mono font-black text-sm text-emerald-600 dark:text-emerald-400">
+                          {audioInputStatus.detectedPitch
+                            ? `${audioInputStatus.detectedPitch} (${audioInputStatus.detectedFrequency} Hz)`
+                            : 'Graj dźwięk...'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-neutral-500 dark:text-zinc-400">Nuta po kalibracji:</span>
+                        <span className="font-mono font-black text-sm text-blue-600 dark:text-blue-400">
+                          {audioInputStatus.detectedPitch
+                            ? remapPitch(audioInputStatus.detectedPitch)
+                            : '—'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* MIDI USB Section */}
+                <div className={`p-4 rounded-xl border transition-all ${
+                  audioInputStatus.isMidiConnected
+                    ? (isDarkMode ? 'bg-blue-950/30 border-blue-500/40' : 'bg-blue-50/80 border-blue-300')
+                    : (isDarkMode ? 'bg-zinc-950/40 border-zinc-800' : 'bg-neutral-50 border-neutral-200')
+                }`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Radio size={18} className={audioInputStatus.isMidiConnected ? 'text-blue-500' : 'text-neutral-400'} />
+                    <span className="font-semibold text-sm">Keyboard / Pianino USB MIDI</span>
+                  </div>
+
+                  <p className="text-xs text-neutral-500 dark:text-zinc-400 leading-relaxed mb-3">
+                    Podłącz cyfrowe pianino przez kabel USB. Przeglądarka automatycznie odczyta wciskane klawisze bez opóźnień.
+                  </p>
+
+                  <div className="flex items-center justify-between text-xs pt-2 border-t border-zinc-800/20 dark:border-zinc-800">
+                    <span className="text-neutral-500 dark:text-zinc-400">Stan połączenia:</span>
+                    <span className={`font-semibold ${audioInputStatus.isMidiConnected ? 'text-blue-600 dark:text-blue-400' : 'text-neutral-400'}`}>
+                      {audioInputStatus.isMidiConnected
+                        ? `🔌 Podłączono: ${audioInputStatus.midiDeviceName || 'MIDI Device'}`
+                        : 'Nie wykryto urządzenia USB MIDI'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Instrument Sound Calibration & Remapping Section */}
+                <div className={`p-4 rounded-xl border transition-all ${
+                  transposeOffset !== 0 || Object.keys(customPitchMap).length > 0
+                    ? (isDarkMode ? 'bg-amber-950/20 border-amber-500/40' : 'bg-amber-50/80 border-amber-300')
+                    : (isDarkMode ? 'bg-zinc-950/40 border-zinc-800' : 'bg-neutral-50 border-neutral-200')
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <SlidersHorizontal size={18} className={transposeOffset !== 0 || Object.keys(customPitchMap).length > 0 ? "text-amber-500" : "text-neutral-400"} />
+                      <span className="font-semibold text-sm">Kalibracja i Remapowanie Dźwięków</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setShowCalibrationHelp(prev => !prev)}
+                        className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold transition-all border ${
+                          showCalibrationHelp
+                            ? (isDarkMode ? 'bg-blue-950/60 border-blue-500/60 text-blue-300' : 'bg-blue-100 border-blue-300 text-blue-700')
+                            : (isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200' : 'bg-neutral-100 border-neutral-300 text-neutral-600 hover:text-neutral-900')
+                        }`}
+                        title="Pokaż lub ukryj podpowiedź jak skalibrować dźwięki"
+                      >
+                        <Lightbulb size={13} className={showCalibrationHelp ? "text-amber-400 fill-amber-400/30" : ""} />
+                        <span>Instrukcja</span>
+                        {showCalibrationHelp ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                      </button>
+                      {(transposeOffset !== 0 || Object.keys(customPitchMap).length > 0) && (
+                        <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                          AKTYWNA
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-neutral-500 dark:text-zinc-400 leading-relaxed mb-3">
+                    Jeśli dźwięki z Twojego pianina nie pasują do nut w aplikacji (np. wyemitowany dźwięk wskazuje inną oktawę lub ton), ustaw przesunięcie lub przypisz klawisze ręcznie.
+                  </p>
+
+                  {/* Step-by-Step Calibration Help Guide Box */}
+                  <AnimatePresence>
+                    {showCalibrationHelp && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className={`overflow-hidden mb-3.5 rounded-xl border ${
+                          isDarkMode
+                            ? 'bg-blue-950/25 border-blue-500/30 text-blue-100'
+                            : 'bg-blue-50/90 border-blue-200 text-neutral-800 shadow-xs'
+                        }`}
+                      >
+                        <div className="p-3.5 space-y-2.5">
+                          <div className="flex items-center gap-2 pb-2 border-b border-blue-500/20">
+                            <Lightbulb size={16} className="text-amber-500 shrink-0" />
+                            <h4 className="font-bold text-xs text-blue-700 dark:text-blue-300">
+                              Jak łatwo skalibrować dźwięki instrumentu?
+                            </h4>
+                          </div>
+
+                          <div className="space-y-2 text-xs leading-relaxed">
+                            {/* Step 1 */}
+                            <div className="flex items-start gap-2">
+                              <span className="font-mono font-bold text-[11px] px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5">
+                                1
+                              </span>
+                              <div>
+                                <strong className="text-neutral-900 dark:text-zinc-100">Włącz mikrofon i zagraj nutę:</strong>
+                                <p className="text-neutral-600 dark:text-zinc-300 text-[11px] mt-0.5">
+                                  Kliknij <em>„Włącz mikrofon”</em> powyżej i zagraj dźwięk na pianinie. Zobacz pole <strong>„Wykryta nuta surowa”</strong> (np. grasz C4, a mikrofon widzi C3 lub C5).
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Step 2 */}
+                            <div className="flex items-start gap-2">
+                              <span className="font-mono font-bold text-[11px] px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5">
+                                2
+                              </span>
+                              <div className="space-y-1.5">
+                                <strong className="text-neutral-900 dark:text-zinc-100">Wybierz sposób kalibracji:</strong>
+                                
+                                <div className={`p-2 rounded-lg border text-[11px] ${
+                                  isDarkMode ? 'bg-zinc-900/60 border-zinc-800' : 'bg-white/90 border-blue-100'
+                                }`}>
+                                  <span className="font-bold text-amber-600 dark:text-amber-400 block mb-0.5">
+                                    🎹 Opcja A: Całe pianino jest przesunięte o oktawę
+                                  </span>
+                                  <p className="text-neutral-600 dark:text-zinc-400">
+                                    Kliknij <strong>-12 (oktawa)</strong> w Transpozycji ogólnej, jeśli aplikacja wykrywa dźwięki za wysoko, lub <strong>+12</strong> jeśli za nisko.
+                                  </p>
+                                </div>
+
+                                <div className={`p-2 rounded-lg border text-[11px] ${
+                                  isDarkMode ? 'bg-zinc-900/60 border-zinc-800' : 'bg-white/90 border-blue-100'
+                                }`}>
+                                  <span className="font-bold text-blue-600 dark:text-blue-400 block mb-0.5">
+                                    🎯 Opcja B: Tylko pojedynczy klawisz jest mylony (np. B2 wykrywane jako B3)
+                                  </span>
+                                  <ol className="list-decimal list-inside space-y-0.5 text-neutral-600 dark:text-zinc-400">
+                                    <li>Kliknij niebieski przycisk <strong>„🎙️ Uchwyć z gry”</strong> (zaświeci się na czerwono).</li>
+                                    <li>Zagraj problematyczny klawisz na pianinie (ustawi się w lewym polu).</li>
+                                    <li>W prawym polu wybierz nutę, którą ten klawisz ma faktycznie oznaczać (np. <strong>B2</strong>).</li>
+                                    <li>Kliknij <strong>„+ Dodaj”</strong>.</li>
+                                  </ol>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Step 3 */}
+                            <div className="flex items-start gap-2">
+                              <span className="font-mono font-bold text-[11px] px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5">
+                                3
+                              </span>
+                              <div>
+                                <strong className="text-neutral-900 dark:text-zinc-100">Sprawdź rezultat:</strong>
+                                <p className="text-neutral-600 dark:text-zinc-300 text-[11px] mt-0.5">
+                                  Zagraj klawisz ponownie – w polu <strong>„Nuta po kalibracji”</strong> oraz w <strong>„Podglądzie na żywo”</strong> pojawi się już właściwa nuta, która trafi do gry.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="pt-2 border-t border-blue-500/15 flex items-center gap-1.5 text-[11px] text-neutral-500 dark:text-zinc-400">
+                            <Radio size={13} className="text-blue-500 shrink-0" />
+                            <span>
+                              <strong>Porada MIDI:</strong> Jeśli posiadasz keyboard/pianino ze złączem USB, podłącz je kablem USB do urządzenia — komunikacja cyfrowa nie wymaga mikrofonu ani kalibracji.
+                            </span>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* 1. Global Transpose Offset */}
+                  <div className={`p-3 rounded-xl border mb-3 ${
+                    isDarkMode ? 'bg-zinc-900/80 border-zinc-800' : 'bg-white border-neutral-200 shadow-xs'
+                  }`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-xs font-bold flex items-center gap-1.5 flex-wrap">
+                        <span>Transpozycja ogólna (półtony):</span>
+                        <span className={`font-mono text-xs px-2 py-0.5 rounded ${
+                          transposeOffset === 0
+                            ? (isDarkMode ? 'bg-zinc-800 text-zinc-400' : 'bg-neutral-100 text-neutral-600')
+                            : 'bg-amber-500 text-white font-bold'
+                        }`}>
+                          {transposeOffset > 0 ? `+${transposeOffset}` : transposeOffset} {transposeOffset === 0 ? '(Brak)' : (Math.abs(transposeOffset) === 12 ? '(1 oktawa)' : 'półtonów')}
+                        </span>
+                      </label>
+                      {transposeOffset !== 0 && (
+                        <button
+                          onClick={() => setTransposeOffset(0)}
+                          className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1"
+                        >
+                          <RotateCcw size={12} /> Resetuj
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {[-12, -2, -1, 0, 1, 2, 12].map(offset => (
+                        <button
+                          key={offset}
+                          onClick={() => setTransposeOffset(offset)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border ${
+                            transposeOffset === offset
+                              ? 'bg-amber-500 text-white border-amber-600 shadow-xs'
+                              : (isDarkMode
+                                  ? 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700'
+                                  : 'bg-neutral-100 border-neutral-200 text-neutral-700 hover:bg-neutral-200')
+                          }`}
+                        >
+                          {offset === 0 ? '0' : (offset > 0 ? `+${offset}` : offset)}
+                          {Math.abs(offset) === 12 ? ' (oktawa)' : ''}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 2. Custom Key/Note Mapping Rules */}
+                  <div className={`p-3 rounded-xl border mb-3 ${
+                    isDarkMode ? 'bg-zinc-900/80 border-zinc-800' : 'bg-white border-neutral-200 shadow-xs'
+                  }`}>
+                    <h4 className="text-xs font-bold mb-2">Ręczne przypisanie konkretnej nuty</h4>
+                    
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-3">
+                      {/* Source/Detected Note */}
+                      <div className="flex-1 flex flex-col gap-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-semibold text-neutral-500 dark:text-zinc-400">Słychać z pianina:</span>
+                          <button
+                            onClick={() => setIsCapturingInput(prev => !prev)}
+                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-all ${
+                              isCapturingInput
+                                ? 'bg-red-500 text-white animate-pulse'
+                                : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20'
+                            }`}
+                          >
+                            {isCapturingInput ? '🔴 Nasłuchuję...' : '🎙️ Uchwyć z gry'}
+                          </button>
+                        </div>
+                        <select
+                          value={calibrationDetectedInput}
+                          onChange={(e) => setCalibrationDetectedInput(e.target.value)}
+                          className={`text-xs px-2.5 py-1.5 rounded-lg border font-mono font-bold focus:outline-hidden ${
+                            isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-100' : 'bg-neutral-50 border-neutral-300 text-neutral-900'
+                          }`}
+                        >
+                          {ALL_CALIBRATION_PITCHES.map(p => (
+                            <option key={p} value={p}>{p}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <span className="text-xs font-bold text-center sm:pt-4 text-amber-500">➔</span>
+
+                      {/* Target/Expected Note */}
+                      <div className="flex-1 flex flex-col gap-1">
+                        <span className="text-[10px] font-semibold text-neutral-500 dark:text-zinc-400">Oznacza w aplikacji:</span>
+                        <select
+                          value={calibrationTargetOutput}
+                          onChange={(e) => setCalibrationTargetOutput(e.target.value)}
+                          className={`text-xs px-2.5 py-1.5 rounded-lg border font-mono font-bold focus:outline-hidden ${
+                            isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-100' : 'bg-neutral-50 border-neutral-300 text-neutral-900'
+                          }`}
+                        >
+                          {ALL_CALIBRATION_PITCHES.map(p => (
+                            <option key={p} value={p}>{p}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <button
+                        onClick={handleAddCalibrationRule}
+                        className="sm:self-end px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs transition-all shadow-xs flex items-center justify-center gap-1 shrink-0 mt-1 sm:mt-0"
+                      >
+                        <Plus size={14} /> Dodaj
+                      </button>
+                    </div>
+
+                    {/* List of mapped rules */}
+                    {Object.keys(customPitchMap).length > 0 ? (
+                      <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                        {Object.entries(customPitchMap).map(([detected, target]) => (
+                          <div
+                            key={detected}
+                            className={`flex items-center justify-between p-2 rounded-lg text-xs font-mono border ${
+                              isDarkMode ? 'bg-zinc-950 border-zinc-800' : 'bg-neutral-50 border-neutral-200'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-neutral-600 dark:text-zinc-300">{detected}</span>
+                              <span className="text-amber-500 font-bold">➔</span>
+                              <span className="font-extrabold text-blue-600 dark:text-blue-400">{target}</span>
+                            </div>
+                            <button
+                              onClick={() => handleRemoveCalibrationRule(detected)}
+                              className="p-1 rounded text-neutral-400 hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                              title="Usuń tę regułę"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-neutral-400 dark:text-zinc-500 italic">
+                        Brak indywidualnych reguł mapowania.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Live test readout */}
+                  <div className={`p-2.5 rounded-xl border flex items-center justify-between text-xs ${
+                    isDarkMode ? 'bg-zinc-950/60 border-zinc-800' : 'bg-neutral-100/70 border-neutral-200'
+                  }`}>
+                    <span className="text-neutral-500 dark:text-zinc-400 font-medium">Podgląd na żywo:</span>
+                    <div className="flex items-center gap-2 font-mono font-bold">
+                      <span className="text-neutral-600 dark:text-zinc-400">
+                        {audioInputStatus.detectedPitch || '—'}
+                      </span>
+                      <span className="text-amber-500">➔</span>
+                      <span className="text-emerald-600 dark:text-emerald-400 font-extrabold text-sm">
+                        {audioInputStatus.detectedPitch ? remapPitch(audioInputStatus.detectedPitch) : '—'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Reset all calibration */}
+                  {(transposeOffset !== 0 || Object.keys(customPitchMap).length > 0) && (
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        onClick={handleResetCalibration}
+                        className="text-xs text-red-500 hover:underline flex items-center gap-1 font-semibold"
+                      >
+                        <RotateCcw size={12} /> Wyczyść całą kalibrację
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => setShowAudioInputModal(false)}
+                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-all shadow-md"
+                >
+                  Gotowe
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
