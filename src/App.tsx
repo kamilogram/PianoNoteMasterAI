@@ -1438,6 +1438,22 @@ const getPitchClass = (p: string): number | null => {
             )}
           </button>
 
+          {/* Skip Beat Button - visible only in listening mode (Mic or MIDI) during play, placed in top bar so it never obscures staff notes */}
+          {isPlaying && (audioInputStatus.isMicActive || audioInputStatus.isMidiConnected) && (
+            <button
+              onClick={skipCurrentBeat}
+              className={`flex items-center gap-1.5 ${isCompact ? 'text-[10px] px-2.5 py-1' : 'text-xs md:text-sm px-3.5 py-1'} rounded-full font-semibold transition-all shadow-sm border ${
+                isDarkMode
+                  ? 'bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border-amber-600/50 shadow-amber-950/30'
+                  : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300 shadow-amber-200/40'
+              }`}
+              title="Pomiń to uderzenie nut (np. nierozpoznany dźwięk mikrofonu lub brak klawisza)"
+            >
+              <SkipForward className="w-3.5 h-3.5 text-amber-500 fill-amber-500/20 shrink-0" />
+              <span className="whitespace-nowrap">{isCompact ? 'Pomiń' : 'Pomiń uderzenie'}</span>
+            </button>
+          )}
+
           <div className={`flex items-center gap-2 px-3 py-1 rounded-full shadow-sm border transition-all ${
             isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-200' : 'bg-white border-neutral-200 text-neutral-900'
           }`}>
@@ -1574,22 +1590,6 @@ const getPitchClass = (p: string): number | null => {
             measureId={measureId}
             isDarkMode={isDarkMode}
           />
-
-          {/* Skip Button - allows skipping the current beat */}
-          {isPlaying && (
-            <button
-              onClick={skipCurrentBeat}
-              className={`absolute top-2.5 right-2.5 z-20 flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-md transition-all shadow-md border ${
-                isDarkMode
-                  ? 'bg-zinc-900/85 hover:bg-zinc-800 text-zinc-200 border-zinc-700/70 shadow-black/40'
-                  : 'bg-white/95 hover:bg-neutral-100 text-neutral-800 border-neutral-300 shadow-neutral-200/50'
-              }`}
-              title="Pomiń to uderzenie nut (np. zbyt duża rozpiętość lub brak klawisza)"
-            >
-              <SkipForward className="w-3.5 h-3.5 text-amber-500 fill-amber-500/20" />
-              <span>Pomiń uderzenie</span>
-            </button>
-          )}
 
           {/* Key Signature Change Announcement Overlay */}
           <AnimatePresence>
