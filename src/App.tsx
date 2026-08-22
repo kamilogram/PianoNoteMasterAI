@@ -826,6 +826,23 @@ export default function App() {
     }
   }, []);
 
+  const handleApplyRecordConfig = useCallback((keyToApply: string) => {
+    const parsed = parseConfigKey(keyToApply);
+    if (!parsed) return;
+
+    if (parsed.keySignature === 'Random' || parsed.keySignature === 'Losowo') {
+      handleKeySignatureChange('Random');
+    } else if (KEY_SIGNATURES[parsed.keySignature as keyof typeof KEY_SIGNATURES]) {
+      handleKeySignatureChange(parsed.keySignature as keyof typeof KEY_SIGNATURES);
+    }
+
+    setMaxNotesPerSpawn(parsed.rawNotes);
+    setLedgerLines(parsed.rawLedger);
+    setUseAccidentals(parsed.rawAccidentals === 1);
+
+    setShowRecordsModal(false);
+  }, [handleKeySignatureChange]);
+
   const generateMeasure = useCallback(() => {
     let currentKey = activeKeySignatureRef.current;
 
@@ -2186,8 +2203,8 @@ const getPitchClass = (p: string): number | null => {
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-3 shrink-0">
-                            <div className="flex flex-col items-end">
+                          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                            <div className="flex flex-col items-end mr-1">
                               <span className="text-[10px] uppercase font-bold text-neutral-400 dark:text-zinc-500 tracking-wider">Rekord</span>
                               <span className={`text-sm font-mono font-black ${
                                 isBeatenInSession
@@ -2197,6 +2214,33 @@ const getPitchClass = (p: string): number | null => {
                                 {scoreVal.toFixed(1)} NPM
                               </span>
                             </div>
+
+                            {/* Button to apply parameters */}
+                            {isCurrentConfig ? (
+                              <button
+                                onClick={() => setShowRecordsModal(false)}
+                                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                                  isDarkMode
+                                    ? 'bg-amber-950/40 text-amber-400 hover:bg-amber-900/50'
+                                    : 'bg-amber-50 text-amber-600 hover:bg-amber-100'
+                                }`}
+                                title="Te parametry są aktualnie wybrane (kliknij, aby zamknąć)"
+                              >
+                                <CheckCircle2 size={16} />
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleApplyRecordConfig(key)}
+                                className={`p-1.5 rounded-lg transition-colors cursor-pointer active:scale-95 ${
+                                  isDarkMode
+                                    ? 'hover:bg-blue-950/60 text-zinc-400 hover:text-blue-400'
+                                    : 'hover:bg-blue-50 text-neutral-400 hover:text-blue-600'
+                                }`}
+                                title="Ustaw te parametry i ćwicz"
+                              >
+                                <Play size={16} fill="currentColor" />
+                              </button>
+                            )}
 
                             <button
                               onClick={() => handleDeleteRecord(key)}
