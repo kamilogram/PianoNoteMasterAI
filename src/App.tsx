@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Piano } from './components/Piano';
 import { Staff } from './components/Staff';
@@ -608,6 +608,18 @@ export default function App() {
   const keyToUse = selectedKeySignature === 'Random' ? activeKeySignature : selectedKeySignature;
   const configKey = `${keyToUse}_${maxNotesPerSpawn}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
   const configRecord = highScores[configKey] || 0;
+
+  const allValidRecords = useMemo(() => {
+    return (Object.entries(highScores) as [string, number][])
+      .filter(([_, scoreVal]) => scoreVal > 0)
+      .sort((a, b) => b[1] - a[1]);
+  }, [highScores]);
+
+  const currentConfigRank = useMemo(() => {
+    if (configRecord <= 0) return null;
+    const index = allValidRecords.findIndex(([key]) => key === configKey);
+    return index !== -1 ? index + 1 : null;
+  }, [allValidRecords, configKey, configRecord]);
 
   useEffect(() => {
     localStorage.setItem('piano_show_pace_tracker', String(showPaceTracker));
@@ -1315,10 +1327,22 @@ const getPitchClass = (p: string): number | null => {
               <button
                 onClick={() => setShowRecordsModal(true)}
                 className="flex items-center gap-1.5 hover:underline cursor-pointer group"
-                title="Kliknij, aby zobaczyć i zarządzać wszystkimi rekordami prędkości"
+                title={
+                  currentConfigRank
+                    ? `Kliknij, aby zobaczyć tabelę rekordów (pozycja #${currentConfigRank} z ${allValidRecords.length} zapisanych rekordów)`
+                    : 'Kliknij, aby zobaczyć i zarządzać wszystkimi rekordami prędkości'
+                }
               >
-                <Trophy size={11} className="text-amber-500 group-hover:scale-110 transition-transform" />
-                <span>Rekord dla parametrów:</span>
+                <Trophy size={11} className="text-amber-500 group-hover:scale-110 transition-transform shrink-0" />
+                <span className="flex items-center gap-1">
+                  Rekord parametrów
+                  {currentConfigRank && (
+                    <span className="text-[11px] font-black tracking-tight text-amber-500 dark:text-amber-400">
+                      (#{currentConfigRank})
+                    </span>
+                  )}
+                  :
+                </span>
                 <strong className={`font-extrabold ${
                   sessionBeatenKeys.has(configKey)
                     ? 'text-emerald-600 dark:text-emerald-400 animate-pulse'
