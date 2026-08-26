@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="108" fill="url(#bgGrad)"/>
+  
+  <!-- Outer Glow / Ring -->
+  <rect x="24" y="24" width="464" height="464" rx="88" fill="none" stroke="#3b82f6" stroke-opacity="0.25" stroke-width="6"/>
+
+  <!-- Piano Frame -->
+  <rect x="76" y="210" width="360" height="200" rx="16" fill="#1e1e24" stroke="#334155" stroke-width="4"/>
+  
+  <!-- White Keys -->
+  <rect x="86" y="220" width="44" height="180" rx="6" fill="#f8fafc"/>
+  <rect x="134" y="220" width="44" height="180" rx="6" fill="#f8fafc"/>
+  <rect x="182" y="220" width="44" height="180" rx="6" fill="#f8fafc"/>
+  <rect x="230" y="220" width="44" height="180" rx="6" fill="#f8fafc"/>
+  <rect x="278" y="220" width="44" height="180" rx="6" fill="#f8fafc"/>
+  <rect x="326" y="220" width="44" height="180" rx="6" fill="#f8fafc"/>
+  <rect x="374" y="220" width="44" height="180" rx="6" fill="#f8fafc"/>
+
+  <!-- Black Keys -->
+  <rect x="118" y="220" width="28" height="110" rx="4" fill="#09090b"/>
+  <rect x="166" y="220" width="28" height="110" rx="4" fill="#09090b"/>
+  <rect x="262" y="220" width="28" height="110" rx="4" fill="#09090b"/>
+  <rect x="310" y="220" width="28" height="110" rx="4" fill="#09090b"/>
+  <rect x="358" y="220" width="28" height="110" rx="4" fill="#09090b"/>
+
+  <!-- Music Notes / Beamed Notes -->
+  <g transform="translate(140, 70)">
+    <!-- Note Stem 1 -->
+    <rect x="36" y="30" width="8" height="70" rx="4" fill="url(#accentGrad)"/>
+    <!-- Note Head 1 -->
+    <ellipse cx="26" cy="100" rx="20" ry="14" transform="rotate(-25 26 100)" fill="url(#accentGrad)"/>
+
+    <!-- Note Stem 2 -->
+    <rect x="156" y="10" width="8" height="80" rx="4" fill="url(#accentGrad)"/>
+    <!-- Note Head 2 -->
+    <ellipse cx="146" cy="90" rx="20" ry="14" transform="rotate(-25 146 90)" fill="url(#accentGrad)"/>
+
+    <!-- Beams -->
+    <polygon points="36,30 164,10 164,24 36,44" fill="url(#accentGrad)"/>
+    <polygon points="36,52 164,32 164,46 36,66" fill="url(#accentGrad)"/>
+  </g>
+</svg>

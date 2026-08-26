@@ -1,0 +1,19 @@
+{
+  "name": "Piano Note Master",
+  "short_name": "PianoNotes",
+  "description": "Aplikacja do nauki czytania nut na fortepianie offline z obsługą mikrofonu, USB MIDI i wirtualnej klawiatury.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#2563eb",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

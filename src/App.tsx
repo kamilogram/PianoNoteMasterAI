@@ -9,7 +9,7 @@ import { Piano } from './components/Piano';
 import { Staff } from './components/Staff';
 import { audioService } from './services/audioService';
 import { audioInputService, AudioInputStatus } from './services/audioInputService';
-import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock, Sun, Moon, Volume2, VolumeX, TrendingUp, History, Calendar, Trash2, X, SlidersHorizontal, Plus, ChevronDown, ChevronUp, Mic, MicOff, Radio, SkipForward, Lightbulb, HelpCircle, Info, CheckCircle2 } from 'lucide-react';
+import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock, Sun, Moon, Volume2, VolumeX, TrendingUp, History, Calendar, Trash2, X, SlidersHorizontal, Plus, ChevronDown, ChevronUp, Mic, MicOff, Radio, SkipForward, Lightbulb, HelpCircle, Info, CheckCircle2, Download, Smartphone, Laptop, Wifi, WifiOff } from 'lucide-react';
 
 interface Note {
   id: number;
@@ -553,6 +553,10 @@ export default function App() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showRecordsModal, setShowRecordsModal] = useState(false);
   const [showClearRecordsConfirm, setShowClearRecordsConfirm] = useState(false);
+  const [showOfflineModal, setShowOfflineModal] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [isInstalled, setIsInstalled] = useState<boolean>(false);
   const [sortRules, setSortRules] = useState<SortRule[]>([
     { field: 'score', order: 'desc' },
     { field: 'notes', order: 'desc' },
@@ -620,6 +624,45 @@ export default function App() {
     const index = allValidRecords.findIndex(([key]) => key === configKey);
     return index !== -1 ? index + 1 : null;
   }, [allValidRecords, configKey, configRecord]);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    const checkStandalone = () => {
+      const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
+      setIsInstalled(isStandalone);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    checkStandalone();
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  const handleInstallPWA = async () => {
+    if (!deferredPrompt) return;
+    try {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+      }
+    } catch (err) {
+      console.warn('Install error:', err);
+    }
+  };
 
   useEffect(() => {
     localStorage.setItem('piano_show_pace_tracker', String(showPaceTracker));
@@ -1583,6 +1626,29 @@ const getPitchClass = (p: string): number | null => {
             title="Historia ostatnich ćwiczeń"
           >
             <History size={isCompact ? 14 : 16} />
+          </button>
+
+          <button 
+            onClick={() => setShowOfflineModal(true)}
+            className={`relative p-1.5 rounded-full transition-colors ${
+              !isOnline
+                ? 'bg-amber-500/20 text-amber-500 border-amber-500/50'
+                : deferredPrompt
+                ? 'bg-blue-600/15 text-blue-500 border-blue-500/40 hover:bg-blue-600/25'
+                : (isDarkMode ? 'text-zinc-400 hover:text-zinc-200 bg-zinc-800/80 hover:bg-zinc-700' : 'text-neutral-500 hover:text-neutral-900 bg-white hover:bg-neutral-100/80')
+            } border border-neutral-200 shadow-sm`}
+            title={!isOnline ? "Tryb Offline (Brak połączenia)" : "Praca offline i instalacja aplikacji (PWA)"}
+          >
+            {!isOnline ? (
+              <WifiOff size={isCompact ? 14 : 16} className="text-amber-500 animate-pulse" />
+            ) : deferredPrompt ? (
+              <Download size={isCompact ? 14 : 16} className="text-blue-500 animate-bounce" />
+            ) : (
+              <Download size={isCompact ? 14 : 16} />
+            )}
+            {!isOnline && (
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-500 border-2 border-zinc-950" />
+            )}
           </button>
 
           <button 
@@ -2749,6 +2815,163 @@ const getPitchClass = (p: string): number | null => {
                   className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-all shadow-md"
                 >
                   Gotowe
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Offline & PWA Installation Modal */}
+        {showOfflineModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className={`w-full max-w-lg rounded-2xl shadow-2xl p-6 border max-h-[90vh] overflow-y-auto ${
+                isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-100' : 'bg-white border-neutral-200 text-neutral-900'
+              }`}
+            >
+              <div className="flex items-center justify-between pb-4 border-b border-neutral-200 dark:border-zinc-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-blue-600/10 text-blue-500 border border-blue-500/20">
+                    <Download size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base">Praca Offline i Instalacja PWA</h3>
+                    <p className="text-xs text-neutral-500 dark:text-zinc-400">
+                      Używaj aplikacji bez dostępu do internetu
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowOfflineModal(false)}
+                  className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-zinc-200 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="mt-5 space-y-4">
+                {/* Status Box */}
+                <div className={`p-4 rounded-xl border flex items-center justify-between ${
+                  !isOnline
+                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
+                    : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                }`}>
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-full ${!isOnline ? 'bg-amber-500/20' : 'bg-emerald-500/20'}`}>
+                      {!isOnline ? <WifiOff size={18} /> : <Wifi size={18} />}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold uppercase tracking-wider">
+                        {!isOnline ? 'Aktualny stan: Tryb Offline' : 'Aktualny stan: Online'}
+                      </div>
+                      <div className="text-xs opacity-90">
+                        Pamięć podręczna Service Worker jest aktywna. Aplikacja działa bez internetu.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Direct One-Click Install Button if supported by browser */}
+                {deferredPrompt && (
+                  <div className="p-4 rounded-xl bg-gradient-to-r from-blue-600/15 via-blue-500/10 to-indigo-600/15 border border-blue-500/30">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="font-bold text-sm text-blue-700 dark:text-blue-300">
+                          Zainstaluj aplikację na urządzeniu
+                        </div>
+                        <div className="text-xs text-neutral-600 dark:text-zinc-400">
+                          Dodaj skrót na pulpicie i uruchamiaj w osobnym oknie bez przeglądarki.
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleInstallPWA}
+                        className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md transition-all shrink-0 cursor-pointer active:scale-95"
+                      >
+                        Zainstaluj teraz
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {isInstalled && (
+                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-300 font-semibold">
+                    <CheckCircle2 size={16} />
+                    Aplikacja jest uruchomiona w trybie autonomicznym (zainstalowana PWA).
+                  </div>
+                )}
+
+                {/* Installation Guides for platforms */}
+                <div className="space-y-2.5">
+                  <div className="text-xs font-bold text-neutral-500 dark:text-zinc-400 uppercase tracking-wider">
+                    Jak zainstalować lub otworzyć offline:
+                  </div>
+
+                  {/* Desktop */}
+                  <div className={`p-3.5 rounded-xl border text-xs space-y-1.5 ${
+                    isDarkMode ? 'bg-zinc-950/40 border-zinc-800' : 'bg-neutral-50 border-neutral-200'
+                  }`}>
+                    <div className="flex items-center gap-2 font-bold text-sm text-neutral-800 dark:text-zinc-200">
+                      <Laptop size={16} className="text-blue-500" />
+                      <span>Komputer (Chrome / Edge / Brave / Opera)</span>
+                    </div>
+                    <p className="text-neutral-600 dark:text-zinc-400 leading-relaxed">
+                      1. Na pasku adresu przeglądarki (po prawej stronie) kliknij ikonę <strong>Instaluj aplikację</strong> (monitor ze strzałką w dół).<br />
+                      2. Lub w menu przeglądarki wybierz <em>„Zapisz i udostępnij”</em> ➔ <em>„Zainstaluj aplikację Piano Note Master”</em>.<br />
+                      3. Skrót pojawi się w menu Start i na pulpicie. Aplikacja będzie uruchamiać się bez internetu.
+                    </p>
+                  </div>
+
+                  {/* Android */}
+                  <div className={`p-3.5 rounded-xl border text-xs space-y-1.5 ${
+                    isDarkMode ? 'bg-zinc-950/40 border-zinc-800' : 'bg-neutral-50 border-neutral-200'
+                  }`}>
+                    <div className="flex items-center gap-2 font-bold text-sm text-neutral-800 dark:text-zinc-200">
+                      <Smartphone size={16} className="text-emerald-500" />
+                      <span>Smartfon / Tablet Android (Chrome / Edge)</span>
+                    </div>
+                    <p className="text-neutral-600 dark:text-zinc-400 leading-relaxed">
+                      Dotknij ikony menu (<strong>⋮</strong>) w prawym górnym rogu ➔ wybierz <strong>„Zainstaluj aplikację”</strong> lub <strong>„Dodaj do ekranu głównego”</strong>.
+                    </p>
+                  </div>
+
+                  {/* iOS Safari */}
+                  <div className={`p-3.5 rounded-xl border text-xs space-y-1.5 ${
+                    isDarkMode ? 'bg-zinc-950/40 border-zinc-800' : 'bg-neutral-50 border-neutral-200'
+                  }`}>
+                    <div className="flex items-center gap-2 font-bold text-sm text-neutral-800 dark:text-zinc-200">
+                      <Smartphone size={16} className="text-indigo-500" />
+                      <span>iPhone / iPad (Przeglądarka Safari)</span>
+                    </div>
+                    <p className="text-neutral-600 dark:text-zinc-400 leading-relaxed">
+                      1. W dolnym pasku przeglądarki Safari kliknij przycisk <strong>Udostępnij</strong> (kwadrat ze strzałką w górę <strong>⎋</strong>).<br />
+                      2. Przewiń w dół i wybierz opcję <strong>„Do ekranu początkowego”</strong> (Add to Home Screen).
+                    </p>
+                  </div>
+
+                  {/* ZIP export */}
+                  <div className={`p-3.5 rounded-xl border text-xs space-y-1.5 ${
+                    isDarkMode ? 'bg-zinc-950/40 border-zinc-800' : 'bg-neutral-50 border-neutral-200'
+                  }`}>
+                    <div className="flex items-center gap-2 font-bold text-sm text-neutral-800 dark:text-zinc-200">
+                      <Info size={16} className="text-amber-500" />
+                      <span>Pobranie jako pliki ZIP na własny komputer</span>
+                    </div>
+                    <p className="text-neutral-600 dark:text-zinc-400 leading-relaxed">
+                      Możesz w każdej chwili pobrać całe archiwum przez menu <strong>Export ➔ ZIP</strong> w Google AI Studio i uruchomić poleceniem <code className="px-1.5 py-0.5 rounded bg-neutral-200 dark:bg-zinc-800 font-mono text-[11px]">npm run dev</code>.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => setShowOfflineModal(false)}
+                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-all shadow-md cursor-pointer"
+                >
+                  Zamknij
                 </button>
               </div>
             </motion.div>
