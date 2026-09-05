@@ -285,10 +285,35 @@ export default function App() {
   const [useAccidentals, setUseAccidentals] = useState<boolean>(() => {
     return localStorage.getItem('piano_use_accidentals') === 'true';
   });
-  const [maxNotesPerSpawn, setMaxNotesPerSpawn] = useState<number>(() => {
-    const saved = localStorage.getItem('piano_max_notes_per_spawn');
-    return saved !== null ? parseInt(saved, 10) : 1;
+  const [selectedMaxNotes, setSelectedMaxNotes] = useState<number | 'Random'>(() => {
+    const saved = localStorage.getItem('piano_selected_max_notes');
+    if (saved === 'Random') return 'Random';
+    if (saved !== null) {
+      const parsed = parseInt(saved, 10);
+      if (!isNaN(parsed) && parsed >= 1 && parsed <= 5) return parsed;
+    }
+    const legacy = localStorage.getItem('piano_max_notes_per_spawn');
+    if (legacy !== null) {
+      const parsed = parseInt(legacy, 10);
+      if (!isNaN(parsed) && parsed >= 1 && parsed <= 5) return parsed;
+    }
+    return 1;
   });
+  const [activeMaxNotes, setActiveMaxNotes] = useState<number>(() => {
+    const saved = localStorage.getItem('piano_selected_max_notes');
+    if (saved && saved !== 'Random') {
+      const parsed = parseInt(saved, 10);
+      if (!isNaN(parsed) && parsed >= 1 && parsed <= 5) return parsed;
+    }
+    const legacy = localStorage.getItem('piano_max_notes_per_spawn');
+    if (legacy !== null) {
+      const parsed = parseInt(legacy, 10);
+      if (!isNaN(parsed) && parsed >= 1 && parsed <= 5) return parsed;
+    }
+    return 1;
+  });
+  const activeMaxNotesRef = useRef<number>(activeMaxNotes);
+
   const [selectedKeySignature, setSelectedKeySignature] = useState<keyof typeof KEY_SIGNATURES | 'Random'>(() => {
     const saved = localStorage.getItem('piano_selected_key_signature');
     return (saved as any) || 'C Major';
@@ -311,11 +336,14 @@ export default function App() {
   const [keyChangeAlert, setKeyChangeAlert] = useState<{
     id: number;
     keyName: string;
+    maxNotesText?: string;
     prevKeyName?: string;
     prevKeyPace?: number | null;
     isNewRecord?: boolean;
     duration?: number;
   } | null>(null);
+  const [startRanks, setStartRanks] = useState<Record<string, number | null>>({});
+  const startRanksRef = useRef<Record<string, number | null>>({});
   const [startTime, setStartTime] = useState<string | null>(null);
   const [startDateTime, setStartDateTime] = useState<Date | null>(null);
   const [elapsedMinutes, setElapsedMinutes] = useState<number>(0);
@@ -337,6 +365,10 @@ export default function App() {
     }
     return {};
   });
+  const highScoresRef = useRef<Record<string, number>>(highScores);
+  useEffect(() => {
+    highScoresRef.current = highScores;
+  }, [highScores]);
 
   const [audioInputStatus, setAudioInputStatus] = useState<AudioInputStatus>({
     isMidiConnected: false,
@@ -610,7 +642,8 @@ export default function App() {
   };
 
   const keyToUse = selectedKeySignature === 'Random' ? activeKeySignature : selectedKeySignature;
-  const configKey = `${keyToUse}_${maxNotesPerSpawn}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
+  const maxNotesToUse = selectedMaxNotes === 'Random' ? activeMaxNotes : selectedMaxNotes;
+  const configKey = `${keyToUse}_${maxNotesToUse}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
   const configRecord = highScores[configKey] || 0;
 
   const allValidRecords = useMemo(() => {
@@ -624,6 +657,25 @@ export default function App() {
     const index = allValidRecords.findIndex(([key]) => key === configKey);
     return index !== -1 ? index + 1 : null;
   }, [allValidRecords, configKey, configRecord]);
+
+  const initialRank = useMemo(() => {
+    if (startRanks[configKey] !== undefined) {
+      return startRanks[configKey];
+    }
+    return currentConfigRank;
+  }, [startRanks, configKey, currentConfigRank]);
+
+  useEffect(() => {
+    if (isPlaying && configKey) {
+      if (startRanksRef.current[configKey] === undefined) {
+        startRanksRef.current[configKey] = currentConfigRank;
+        setStartRanks(prev => ({
+          ...prev,
+          [configKey]: currentConfigRank
+        }));
+      }
+    }
+  }, [isPlaying, configKey, currentConfigRank]);
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: Event) => {
@@ -677,8 +729,9 @@ export default function App() {
   }, [useAccidentals]);
 
   useEffect(() => {
-    localStorage.setItem('piano_max_notes_per_spawn', String(maxNotesPerSpawn));
-  }, [maxNotesPerSpawn]);
+    localStorage.setItem('piano_selected_max_notes', String(selectedMaxNotes));
+    localStorage.setItem('piano_max_notes_per_spawn', String(maxNotesToUse));
+  }, [selectedMaxNotes, maxNotesToUse]);
 
   useEffect(() => {
     localStorage.setItem('piano_selected_key_signature', selectedKeySignature);
@@ -697,7 +750,7 @@ export default function App() {
   useEffect(() => {
     // Reset segment-specific pace variables on parameter changes
     resetSegmentPace();
-  }, [selectedKeySignature, maxNotesPerSpawn, ledgerLines, useAccidentals, resetSegmentPace]);
+  }, [selectedKeySignature, selectedMaxNotes, ledgerLines, useAccidentals, resetSegmentPace]);
 
   const calculateAndSavePace = useCallback(() => {
     const startDateTimeVal = startDateTimeRef.current;
@@ -717,12 +770,13 @@ export default function App() {
     setCurrentPace(pace);
 
     // Update record if beaten for current config
-    const currentRecord = highScores[configKey] || 0;
+    const currentRecord = highScoresRef.current[configKey] || 0;
     if (pace > currentRecord) {
       const nextHighScores = {
-        ...highScores,
+        ...highScoresRef.current,
         [configKey]: pace,
       };
+      highScoresRef.current = nextHighScores;
       setHighScores(nextHighScores);
       localStorage.setItem('piano_pace_high_scores', JSON.stringify(nextHighScores));
       setSessionBeatenKeys(prev => {
@@ -731,7 +785,7 @@ export default function App() {
         return next;
       });
     }
-  }, [configKey, highScores]);
+  }, [configKey]);
 
   const saveSessionToHistory = useCallback(() => {
     if (!startDateTime) return;
@@ -869,6 +923,32 @@ export default function App() {
     }
   }, []);
 
+  const handleMaxNotesChange = useCallback((val: number | 'Random') => {
+    setSelectedMaxNotes(val);
+    if (val === 'Random') {
+      measuresPlayedRef.current = 0;
+      const possible = [1, 2, 3, 4, 5];
+      const randomNotes = possible[Math.floor(Math.random() * possible.length)];
+      activeMaxNotesRef.current = randomNotes;
+      setActiveMaxNotes(randomNotes);
+      segmentStartHitsRef.current = correctHitsRef.current;
+      segmentStartDurationMsRef.current = activeDurationMsRef.current;
+      setCurrentPace(null);
+      setKeyChangeAlert({
+        id: Date.now(),
+        keyName: selectedKeySignature === 'Random' ? `Losowa: ${activeKeySignatureRef.current}` : activeKeySignatureRef.current,
+        maxNotesText: `Maks. nut: ${randomNotes} (Losowo)`,
+        duration: 3500
+      });
+    } else {
+      activeMaxNotesRef.current = val;
+      setActiveMaxNotes(val);
+      segmentStartHitsRef.current = correctHitsRef.current;
+      segmentStartDurationMsRef.current = activeDurationMsRef.current;
+      setCurrentPace(null);
+    }
+  }, [selectedKeySignature]);
+
   const handleApplyRecordConfig = useCallback((keyToApply: string) => {
     const parsed = parseConfigKey(keyToApply);
     if (!parsed) return;
@@ -879,28 +959,44 @@ export default function App() {
       handleKeySignatureChange(parsed.keySignature as keyof typeof KEY_SIGNATURES);
     }
 
-    setMaxNotesPerSpawn(parsed.rawNotes);
+    handleMaxNotesChange(parsed.rawNotes);
     setLedgerLines(parsed.rawLedger);
     setUseAccidentals(parsed.rawAccidentals === 1);
 
     setShowRecordsModal(false);
-  }, [handleKeySignatureChange]);
+  }, [handleKeySignatureChange, handleMaxNotesChange]);
 
   const generateMeasure = useCallback(() => {
     let currentKey = activeKeySignatureRef.current;
+    let currentMaxNotes = activeMaxNotesRef.current;
 
-    if (selectedKeySignature === 'Random') {
+    const isRandomKey = selectedKeySignature === 'Random';
+    const isRandomNotes = selectedMaxNotes === 'Random';
+
+    if (isRandomKey || isRandomNotes) {
       const isNewRun = measuresPlayedRef.current === 0;
       const needsChange = !isNewRun && (measuresPlayedRef.current % 4 === 0);
       
       if (isNewRun || needsChange) {
-        const keys = Object.keys(KEY_SIGNATURES) as Array<keyof typeof KEY_SIGNATURES>;
-        const availableKeys = keys.filter(k => k !== currentKey);
-        const randomKey = availableKeys[Math.floor(Math.random() * availableKeys.length)];
+        let nextKey = currentKey;
+        let nextMaxNotes = currentMaxNotes;
+
+        if (isRandomKey) {
+          const keys = Object.keys(KEY_SIGNATURES) as Array<keyof typeof KEY_SIGNATURES>;
+          const availableKeys = keys.filter(k => k !== currentKey);
+          nextKey = availableKeys[Math.floor(Math.random() * availableKeys.length)];
+        }
+
+        if (isRandomNotes) {
+          const possible = [1, 2, 3, 4, 5];
+          const availableNotes = possible.filter(n => n !== currentMaxNotes);
+          nextMaxNotes = availableNotes[Math.floor(Math.random() * availableNotes.length)];
+        }
         
         if (needsChange) {
           const finishedKey = currentKey;
-          const finishedConfigKey = `${finishedKey}_${maxNotesPerSpawn}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
+          const finishedMaxNotes = currentMaxNotes;
+          const finishedConfigKey = `${finishedKey}_${finishedMaxNotes}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
           const hitsInKey = correctHitsRef.current - segmentStartHitsRef.current;
           const durationInKeyMs = activeDurationMsRef.current - segmentStartDurationMsRef.current;
           const durationInKeySecs = durationInKeyMs / 1000;
@@ -910,10 +1006,12 @@ export default function App() {
 
           if (durationInKeySecs >= 1 && hitsInKey > 0) {
             keyPace = (hitsInKey * 60) / durationInKeySecs;
-            const previousRecord = highScores[finishedConfigKey] || 0;
+            const currentScores = highScoresRef.current;
+            const previousRecord = currentScores[finishedConfigKey] || 0;
             if (keyPace > previousRecord) {
               isNewRecord = true;
-              const nextHighScores = { ...highScores, [finishedConfigKey]: keyPace };
+              const nextHighScores = { ...currentScores, [finishedConfigKey]: keyPace };
+              highScoresRef.current = nextHighScores;
               setHighScores(nextHighScores);
               localStorage.setItem('piano_pace_high_scores', JSON.stringify(nextHighScores));
               setSessionBeatenKeys(prev => new Set(prev).add(finishedConfigKey));
@@ -922,19 +1020,45 @@ export default function App() {
 
           setKeyChangeAlert({
             id: Date.now(),
-            keyName: randomKey,
-            prevKeyName: finishedKey,
+            keyName: nextKey,
+            maxNotesText: isRandomNotes ? `Maks. nut: ${nextMaxNotes}` : undefined,
+            prevKeyName: `${finishedKey} (N${finishedMaxNotes})`,
             prevKeyPace: keyPace,
             isNewRecord,
             duration: 5000
           });
         } else {
-          setKeyChangeAlert({ id: Date.now(), keyName: `Losowa tonacja: ${randomKey}`, duration: 3500 });
+          setKeyChangeAlert({
+            id: Date.now(),
+            keyName: isRandomKey ? `Losowa tonacja: ${nextKey}` : nextKey,
+            maxNotesText: isRandomNotes ? `Maks. nut: ${nextMaxNotes} (Losowo)` : undefined,
+            duration: 3500
+          });
         }
 
-        currentKey = randomKey;
-        activeKeySignatureRef.current = randomKey;
-        setActiveKeySignature(randomKey);
+        currentKey = nextKey;
+        activeKeySignatureRef.current = nextKey;
+        setActiveKeySignature(nextKey);
+
+        currentMaxNotes = nextMaxNotes;
+        activeMaxNotesRef.current = nextMaxNotes;
+        setActiveMaxNotes(nextMaxNotes);
+
+        const nextConfigKey = `${nextKey}_${nextMaxNotes}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
+        if (startRanksRef.current[nextConfigKey] === undefined) {
+          const currentScores = highScoresRef.current;
+          const nextScore = currentScores[nextConfigKey] || 0;
+          let rankVal: number | null = null;
+          if (nextScore > 0) {
+            const sortedRecords = (Object.entries(currentScores) as [string, number][])
+              .filter(([_, s]) => s > 0)
+              .sort((a, b) => b[1] - a[1]);
+            const nextRankIdx = sortedRecords.findIndex(([k]) => k === nextConfigKey);
+            if (nextRankIdx !== -1) rankVal = nextRankIdx + 1;
+          }
+          startRanksRef.current[nextConfigKey] = rankVal;
+          setStartRanks(prev => ({ ...prev, [nextConfigKey]: rankVal }));
+        }
 
         segmentStartHitsRef.current = correctHitsRef.current;
         segmentStartDurationMsRef.current = activeDurationMsRef.current;
@@ -949,7 +1073,7 @@ export default function App() {
     const measureAccidentals = new Map<string, string>(); // displayPitch -> 'sharp' | 'flat' | 'natural'
 
     for (let beatIndex = 0; beatIndex < 4; beatIndex++) {
-      const count = Math.floor(Math.random() * maxNotesPerSpawn) + 1;
+      const count = Math.floor(Math.random() * activeMaxNotesRef.current) + 1;
       const xPos = beatXs[beatIndex];
       const usedNotesInBeat: { pitch: string, isTreble: boolean, abs: number }[] = [];
       const noteNames = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
@@ -1129,14 +1253,19 @@ export default function App() {
     setMeasureId(id => id + 1);
     setActivePianoNotes(new Map());
     lastPressBeatRef.current = 0;
-  }, [useAccidentals, selectedKeySignature, maxNotesPerSpawn, ledgerLines]);
+  }, [useAccidentals, selectedKeySignature, selectedMaxNotes, ledgerLines]);
 
-  // Regenerate on settings change
+  // Regenerate only when settings are manually changed while playing
+  const isSettingsInitialMount = useRef(true);
   useEffect(() => {
-    if (isPlaying) {
+    if (isSettingsInitialMount.current) {
+      isSettingsInitialMount.current = false;
+      return;
+    }
+    if (isPlayingRef.current) {
       generateMeasure();
     }
-  }, [generateMeasure, isPlaying]);
+  }, [useAccidentals, selectedKeySignature, selectedMaxNotes, ledgerLines, generateMeasure]);
 
 const PITCH_CLASS_MAP: Record<string, number> = {
   'C': 0, 'B#': 0,
@@ -1227,7 +1356,7 @@ const getPitchClass = (p: string): number | null => {
         } else {
           // Reached end of measure
           setTimeout(() => {
-            if (isPlaying) {
+            if (isPlayingRef.current) {
               calculateAndSavePace();
               generateMeasure(); // only generate if still playing
             }
@@ -1349,6 +1478,8 @@ const getPitchClass = (p: string): number | null => {
     segmentStartHitsRef.current = 0;
     segmentStartDurationMsRef.current = 0;
     setCurrentPace(null);
+    startRanksRef.current = {};
+    setStartRanks({});
   };
 
   const totalSecs = history.reduce((acc, item) => acc + ((item.minutes ?? 0) * 60 + (item.seconds ?? 0)), 0);
@@ -1386,24 +1517,47 @@ const getPitchClass = (p: string): number | null => {
               <div className={`w-px h-3 ${isDarkMode ? 'bg-zinc-800' : 'bg-neutral-200'}`} />
               <button
                 onClick={() => setShowRecordsModal(true)}
-                className="flex items-center gap-1.5 hover:underline cursor-pointer group"
+                className="flex items-center gap-1.5 hover:opacity-90 cursor-pointer group transition-all"
                 title={
                   currentConfigRank
-                    ? `Kliknij, aby zobaczyć tabelę rekordów (pozycja #${currentConfigRank} z ${allValidRecords.length} zapisanych rekordów)`
+                    ? `Kliknij, aby zobaczyć tabelę rekordów (pozycja #${currentConfigRank} z ${allValidRecords.length} zapisanych rekordów${
+                        initialRank && initialRank !== currentConfigRank ? `, na starcie: #${initialRank}` : ''
+                      })`
                     : 'Kliknij, aby zobaczyć i zarządzać wszystkimi rekordami prędkości'
                 }
               >
-                <Trophy size={11} className="text-amber-500 group-hover:scale-110 transition-transform shrink-0" />
-                <span className="flex items-center gap-1">
-                  Rekord parametrów
-                  {currentConfigRank && (
-                    <span className="text-[11px] font-black tracking-tight text-amber-500 dark:text-amber-400">
-                      (#{currentConfigRank})
+                <Trophy size={12} className="text-amber-500 group-hover:scale-110 transition-transform shrink-0" />
+                <span className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-semibold text-xs">Rekord parametrów:</span>
+                  {currentConfigRank ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-400 text-black font-black text-[11px] shadow-xs tracking-tight">
+                      {initialRank && initialRank !== currentConfigRank ? (
+                        <>
+                          <span>#{initialRank} -&gt; #{currentConfigRank}</span>
+                          {currentConfigRank < initialRank && (
+                            <span className="text-emerald-950 font-black text-xs leading-none" title="Awans w rankingu!">
+                              ▲
+                            </span>
+                          )}
+                        </>
+                      ) : initialRank === null && currentConfigRank ? (
+                        <>
+                          <span>brak -&gt; #{currentConfigRank}</span>
+                          <span className="text-emerald-950 font-black text-xs leading-none" title="Nowy rekord w rankingu!">
+                            ▲
+                          </span>
+                        </>
+                      ) : (
+                        <span>#{currentConfigRank}</span>
+                      )}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-neutral-200 dark:bg-zinc-800 text-black dark:text-zinc-100 font-bold text-[11px]">
+                      <span>brak</span>
                     </span>
                   )}
-                  :
                 </span>
-                <strong className={`font-extrabold ${
+                <strong className={`font-extrabold text-xs ml-0.5 ${
                   sessionBeatenKeys.has(configKey)
                     ? 'text-emerald-600 dark:text-emerald-400 animate-pulse'
                     : (isDarkMode ? 'text-zinc-200' : 'text-neutral-800')
@@ -1458,19 +1612,30 @@ const getPitchClass = (p: string): number | null => {
           </div>
 
           {/* Max Notes Per Spawn Selector */}
-          <div className={`flex items-center gap-2 px-3 py-1 rounded-full shadow-sm border transition-all ${
-            isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-200' : 'bg-white border-neutral-200 text-neutral-900'
-          }`}>
-            {!isCompact && <span className={`text-[10px] font-bold uppercase ${isDarkMode ? 'text-zinc-500' : 'text-neutral-400'}`}>Max notes:</span>}
+          <div 
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full shadow-sm border transition-all ${
+              isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-200' : 'bg-white border-neutral-200 text-neutral-900'
+            }`}
+            title={selectedMaxNotes === 'Random' ? `Maks. nut: Losowo (aktualnie ${activeMaxNotes}, co 4 takty)` : `Maks. nut: ${selectedMaxNotes}`}
+          >
+            {!isCompact && <span className={`text-[10px] font-bold uppercase ${isDarkMode ? 'text-zinc-500' : 'text-neutral-400'}`}>Nut:</span>}
             <select 
-              value={maxNotesPerSpawn}
-              onChange={(e) => setMaxNotesPerSpawn(parseInt(e.target.value))}
-              className={`${isCompact ? 'text-[10px]' : 'text-xs'} font-bold outline-none bg-transparent ${isDarkMode ? 'text-zinc-200 [&>option]:bg-zinc-900 [&>option]:text-zinc-205' : 'text-neutral-900'}`}
+              value={selectedMaxNotes}
+              onChange={(e) => handleMaxNotesChange(e.target.value === 'Random' ? 'Random' : parseInt(e.target.value, 10))}
+              className={`${isCompact ? 'text-[10px]' : 'text-xs'} font-bold outline-none bg-transparent cursor-pointer ${isDarkMode ? 'text-zinc-200 [&>option]:bg-zinc-900 [&>option]:text-zinc-205' : 'text-neutral-900'}`}
             >
+              <option value="Random" className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>
+                Losowo
+              </option>
               {[1, 2, 3, 4, 5].map(v => (
-                <option key={v} value={v} className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>{isCompact ? `N${v}` : v}</option>
+                <option key={v} value={v} className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>{v}</option>
               ))}
             </select>
+            {selectedMaxNotes === 'Random' && (
+              <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-amber-400 text-black leading-none shrink-0" title="Obecnie wylosowana maksymalna ilość nut w takcie">
+                {activeMaxNotes}
+              </span>
+            )}
           </div>
 
           {/* Pace Tracker Toggle */}
@@ -1581,6 +1746,13 @@ const getPitchClass = (p: string): number | null => {
                   segmentStartDurationMsRef.current = 0;
                   setCurrentPace(null);
                   measuresPlayedRef.current = 0;
+                  if (startRanksRef.current[configKey] === undefined) {
+                    startRanksRef.current[configKey] = currentConfigRank;
+                    setStartRanks(prev => ({
+                      ...prev,
+                      [configKey]: currentConfigRank
+                    }));
+                  }
                   generateMeasure();
                 }
               }
@@ -1712,13 +1884,18 @@ const getPitchClass = (p: string): number | null => {
                 <div className="flex items-center justify-between gap-3 w-full">
                   <div className="flex items-center gap-2">
                     <Music className="w-4 h-4 text-amber-100 shrink-0" />
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-[10px] uppercase font-bold tracking-wider text-amber-100">
                         Tonacja:
                       </span>
                       <span className="text-sm font-bold leading-none">
                         {keyChangeAlert.keyName}
                       </span>
+                      {keyChangeAlert.maxNotesText && (
+                        <span className="text-[11px] bg-amber-950/40 text-amber-100 font-bold px-2 py-0.5 rounded-full ml-1 border border-amber-300/30">
+                          {keyChangeAlert.maxNotesText}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2217,7 +2394,7 @@ const getPitchClass = (p: string): number | null => {
                     .sort(([keyA, scoreA], [keyB, scoreB]) =>
                       compareParsedRecords(keyA, scoreA, keyB, scoreB, sortRules)
                     )
-                    .map(([key, scoreVal]) => {
+                    .map(([key, scoreVal], idx) => {
                       const parsed = parseConfigKey(key);
                       const isCurrentConfig = key === configKey;
                       const isBeatenInSession = sessionBeatenKeys.has(key);
@@ -2235,12 +2412,15 @@ const getPitchClass = (p: string): number | null => {
                         >
                           <div className="flex flex-col gap-1.5 items-start">
                             <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-black px-2 py-0.5 rounded-md bg-neutral-200 dark:bg-zinc-800 text-black dark:text-zinc-100 font-mono">
+                                #{idx + 1}
+                              </span>
                               <span className="font-bold text-sm">
                                 {formatKeySignatureWithAccidentals(parsed.keySignature)}
                               </span>
                               {isCurrentConfig && (
-                                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-500 text-black">
-                                  Aktualne ustawienia
+                                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-400 text-black shadow-xs">
+                                  Aktualne {initialRank && initialRank !== idx + 1 ? `(#${initialRank} -> #${idx + 1})` : ''}
                                 </span>
                               )}
                               {isBeatenInSession && (
