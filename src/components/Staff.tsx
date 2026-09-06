@@ -20,6 +20,8 @@ interface StaffProps {
   isCompact?: boolean;
   measureId?: number;
   isDarkMode?: boolean;
+  isListeningMode?: boolean;
+  maxNotes?: number;
   children?: React.ReactNode;
 }
 
@@ -84,7 +86,17 @@ const getBassKeyPos = (pitch: string): string => {
   return `${note}${octave - 2}`;
 };
 
-export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0, keySignature = 'C Major', isCompact = false, measureId = 0, isDarkMode = false, children }) => {
+export const Staff: React.FC<StaffProps> = React.memo(({ 
+  notes, 
+  currentBeat = 0, 
+  keySignature = 'C Major', 
+  isCompact = false, 
+  measureId = 0, 
+  isDarkMode = false, 
+  isListeningMode = false,
+  maxNotes,
+  children 
+}) => {
   const bgCanvasRef = useRef<HTMLCanvasElement>(null);
   const fgCanvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -238,7 +250,7 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
         // Draw treble rest if empty
         if (trebleNotesInBeat.length === 0) {
           ctx.save();
-          ctx.globalAlpha = isBeatCompleted ? 0.25 : 1.0;
+          ctx.globalAlpha = 1.0;
           ctx.fillStyle = primaryNoteColor;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
@@ -251,7 +263,7 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
         // Draw bass rest if empty
         if (bassNotesInBeat.length === 0) {
           ctx.save();
-          ctx.globalAlpha = isBeatCompleted ? 0.25 : 1.0;
+          ctx.globalAlpha = 1.0;
           ctx.fillStyle = primaryNoteColor;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
@@ -265,17 +277,21 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
 
     // 1. Draw stems and ledger lines first
     notes.forEach(note => {
-      const isPastBeat = note.beatIndex < currentBeat;
+      const notesInBeatCount = notes.filter(n => n.beatIndex === note.beatIndex).length;
       const isHit = !!note.isHit;
+      
+      // Green color ONLY in sound listening mode when there is more than maximum 1 note per beat
+      const hasMoreThanOneNote = (maxNotes !== undefined ? maxNotes > 1 : false) || notesInBeatCount > 1;
+      const isGreen = Boolean(isListeningMode && hasMoreThanOneNote && isHit);
       const hitGreenColor = isDarkMode ? '#4ade80' : '#16a34a';
 
-      ctx.globalAlpha = isPastBeat ? 0.3 : 1.0;
+      ctx.globalAlpha = 1.0;
 
       const yBase = note.clef === 'treble' ? 0 : BASS_OFFSET;
       const y = yBase + getNoteY(note.displayPitch, note.clef, STAFF_PADDING, LINE_SPACING);
 
       // Stem
-      ctx.strokeStyle = isHit ? hitGreenColor : primaryNoteColor;
+      ctx.strokeStyle = isGreen ? hitGreenColor : primaryNoteColor;
       ctx.lineWidth = isCompact ? 1.2 : 1.8;
       ctx.beginPath();
       const stemXOffset = isCompact ? 8 : 12;
@@ -305,26 +321,28 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
           ctx.stroke();
         }
       }
-
-      ctx.globalAlpha = 1.0;
     });
 
     // 2. Draw noteheads and accidentals on top so green hit notes stand out clearly
     notes.forEach(note => {
-      const isPastBeat = note.beatIndex < currentBeat;
+      const notesInBeatCount = notes.filter(n => n.beatIndex === note.beatIndex).length;
       const isHit = !!note.isHit;
 
-      const hitGreenColor = isDarkMode ? '#4ade80' : '#16a34a';
-      const currentNoteColor = isHit ? hitGreenColor : primaryNoteColor;
-      const currentAccidentalColor = isHit ? hitGreenColor : primaryNoteColor;
+      // Green color ONLY in sound listening mode when there is more than maximum 1 note per beat
+      const hasMoreThanOneNote = (maxNotes !== undefined ? maxNotes > 1 : false) || notesInBeatCount > 1;
+      const isGreen = Boolean(isListeningMode && hasMoreThanOneNote && isHit);
 
-      ctx.globalAlpha = isPastBeat ? 0.3 : 1.0;
+      const hitGreenColor = isDarkMode ? '#4ade80' : '#16a34a';
+      const currentNoteColor = isGreen ? hitGreenColor : primaryNoteColor;
+      const currentAccidentalColor = isGreen ? hitGreenColor : primaryNoteColor;
+
+      ctx.globalAlpha = 1.0;
 
       const yBase = note.clef === 'treble' ? 0 : BASS_OFFSET;
       const y = yBase + getNoteY(note.displayPitch, note.clef, STAFF_PADDING, LINE_SPACING);
 
       // Glowing green halo for correctly guessed notes
-      if (isHit) {
+      if (isGreen) {
         ctx.save();
         ctx.beginPath();
         ctx.arc(note.x, y, isCompact ? 14 : 20, 0, Math.PI * 2);
@@ -350,40 +368,25 @@ export const Staff: React.FC<StaffProps> = React.memo(({ notes, currentBeat = 0,
         ctx.font = `bold ${isCompact ? 36 : 54}px serif`;
         ctx.fillText(note.accidental, note.x - (isCompact ? 34 : 51), y + (isCompact ? 12 : 18));
       }
-      
-      ctx.globalAlpha = 1.0;
     });
 
-  }, [notes, currentBeat, isCompact, keySignature, LINE_SPACING, STEP_SPACING, STAFF_PADDING, BASS_OFFSET, isDarkMode]);
+  }, [notes, currentBeat, isCompact, keySignature, LINE_SPACING, STEP_SPACING, STAFF_PADDING, BASS_OFFSET, isDarkMode, isListeningMode, maxNotes]);
 
   return (
     <div className={`w-full md:h-full flex items-center justify-center transition-colors duration-500 rounded-xl shadow-inner overflow-hidden border relative ${isCompact ? 'aspect-[1000/420]' : 'aspect-[1000/670]'} md:aspect-auto ${isDarkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-neutral-200'}`}>
       <canvas
-        key={`bg-${isDarkMode ? 'dark' : 'light'}`}
         ref={bgCanvasRef}
         width={1000}
         height={canvasHeight}
         className="absolute inset-0 w-full h-full max-w-[1000px] max-h-[670px] m-auto object-contain pointer-events-none"
       />
       {children}
-      <AnimatePresence mode="popLayout">
-        <motion.div
-          key={measureId}
-          initial={{ opacity: 0, filter: 'blur(8px)', scale: 0.98 }}
-          animate={{ opacity: 1, filter: 'blur(0px)', scale: 1 }}
-          exit={{ opacity: 0, filter: 'blur(8px)', scale: 1.02 }}
-          transition={{ duration: 0.4, ease: 'easeInOut' }}
-          className="absolute inset-0 w-full h-full flex items-center justify-center pointer-events-none z-10"
-        >
-          <canvas
-            key={isDarkMode ? 'dark' : 'light'}
-            ref={fgCanvasRef}
-            width={1000}
-            height={canvasHeight}
-            className="w-full h-full max-w-[1000px] max-h-[670px] m-auto object-contain pointer-events-none"
-          />
-        </motion.div>
-      </AnimatePresence>
+      <canvas
+        ref={fgCanvasRef}
+        width={1000}
+        height={canvasHeight}
+        className="absolute inset-0 w-full h-full max-w-[1000px] max-h-[670px] m-auto object-contain pointer-events-none z-10"
+      />
     </div>
   );
 });
