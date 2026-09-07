@@ -1502,7 +1502,6 @@ const getPitchClass = (p: string): number | null => {
       setCorrectHits(c => {
         const next = c + 1;
         correctHitsRef.current = next;
-        calculateAndSavePace();
         return next;
       });
       setFeedback({ type: 'hit', id: Date.now(), message: 'Dobrze' });
