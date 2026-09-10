@@ -1289,9 +1289,9 @@ export default function App() {
         };
 
         // If a previously generated note in this measure got an accidental, increase the probability of repeating it
-        const recurringNotesWithAccidentals = newNotes.filter(
+        const recurringNotesWithAccidentals = useAccidentals ? newNotes.filter(
           n => n.clef === (isTreble ? 'treble' : 'bass') && n.accidental !== null && n.accidental !== undefined
-        );
+        ) : [];
         let chosenFromRecurring = false;
         
         // 60% chance to repeat a note with an accidental from previously generated beats in this measure
@@ -1350,33 +1350,35 @@ export default function App() {
         const hasMeasureAccidental = measureAccidentals.has(accidentalKey);
         const existingMeasureMod = measureAccidentals.get(accidentalKey);
 
-        if (hasMeasureAccidental && existingMeasureMod && Math.random() < 0.90) {
-          // Keep the existing modification 90% of the time, so cancellations/changes are rare
-          targetMod = existingMeasureMod;
-        } else {
-          if (currentKey !== 'C Major' && sigState !== 'natural' && Math.random() > 0.8) {
-            if (isAccidentalAllowed(noteName, 'natural', currentKey)) {
-              targetMod = 'natural';
-            }
-          } else if (useAccidentals && Math.random() > 0.7) {
-            const canHaveSharp = ['C', 'D', 'F', 'G', 'A'].includes(noteName);
-            const canHaveFlat = ['D', 'E', 'G', 'A', 'B'].includes(noteName);
-            
-            const validOptions: ('sharp' | 'flat' | 'natural')[] = [];
-            if (canHaveSharp && isAccidentalAllowed(noteName, 'sharp', currentKey)) {
-              validOptions.push('sharp');
-            }
-            if (canHaveFlat && isAccidentalAllowed(noteName, 'flat', currentKey)) {
-              validOptions.push('flat');
-            }
-            if (isAccidentalAllowed(noteName, 'natural', currentKey)) {
-              validOptions.push('natural');
-            }
+        if (useAccidentals) {
+          if (hasMeasureAccidental && existingMeasureMod && Math.random() < 0.90) {
+            // Keep the existing modification 90% of the time, so cancellations/changes are rare
+            targetMod = existingMeasureMod;
+          } else {
+            if (currentKey !== 'C Major' && sigState !== 'natural' && Math.random() > 0.8) {
+              if (isAccidentalAllowed(noteName, 'natural', currentKey)) {
+                targetMod = 'natural';
+              }
+            } else if (Math.random() > 0.7) {
+              const canHaveSharp = ['C', 'D', 'F', 'G', 'A'].includes(noteName);
+              const canHaveFlat = ['D', 'E', 'G', 'A', 'B'].includes(noteName);
+              
+              const validOptions: ('sharp' | 'flat' | 'natural')[] = [];
+              if (canHaveSharp && isAccidentalAllowed(noteName, 'sharp', currentKey)) {
+                validOptions.push('sharp');
+              }
+              if (canHaveFlat && isAccidentalAllowed(noteName, 'flat', currentKey)) {
+                validOptions.push('flat');
+              }
+              if (isAccidentalAllowed(noteName, 'natural', currentKey)) {
+                validOptions.push('natural');
+              }
 
-            if (validOptions.length > 0) {
-              targetMod = validOptions[Math.floor(Math.random() * validOptions.length)];
-            } else {
-              targetMod = sigState;
+              if (validOptions.length > 0) {
+                targetMod = validOptions[Math.floor(Math.random() * validOptions.length)];
+              } else {
+                targetMod = sigState;
+              }
             }
           }
         }
