@@ -9,7 +9,7 @@ import { Piano } from './components/Piano';
 import { Staff } from './components/Staff';
 import { audioService } from './services/audioService';
 import { audioInputService, AudioInputStatus } from './services/audioInputService';
-import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock, Sun, Moon, Volume2, VolumeX, TrendingUp, History, Calendar, Trash2, X, SlidersHorizontal, Plus, ChevronDown, ChevronUp, Mic, MicOff, Radio, SkipForward, Lightbulb, HelpCircle, Info, CheckCircle2, Download, Smartphone, Laptop, Wifi, WifiOff } from 'lucide-react';
+import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock, Sun, Moon, Volume2, VolumeX, TrendingUp, History, Calendar, Trash2, X, SlidersHorizontal, Plus, ChevronDown, ChevronUp, Mic, MicOff, Radio, SkipForward, Lightbulb, HelpCircle, Info, CheckCircle2, Download, Smartphone, Laptop, Wifi, WifiOff, ArrowUp, ArrowDown } from 'lucide-react';
 
 interface Note {
   id: number;
@@ -356,6 +356,10 @@ export default function App() {
     rankImproved?: boolean;
     duration?: number;
   } | null>(null);
+  const keyChangeAlertRef = useRef<typeof keyChangeAlert>(null);
+  useEffect(() => {
+    keyChangeAlertRef.current = keyChangeAlert;
+  }, [keyChangeAlert]);
   const [startRanks, setStartRanks] = useState<Record<string, number | null>>({});
   const startRanksRef = useRef<Record<string, number | null>>({});
   const startScoresRef = useRef<Record<string, number>>({});
@@ -368,6 +372,8 @@ export default function App() {
   });
   const [correctHits, setCorrectHits] = useState<number>(0);
   const [currentPace, setCurrentPace] = useState<number | null>(null);
+  const [paceTrend, setPaceTrend] = useState<'up' | 'down' | 'equal' | null>(null);
+  const lastMeasurePaceRef = useRef<number | null>(null);
   const [sessionBeatenKeys, setSessionBeatenKeys] = useState<Set<string>>(new Set());
   const [highScores, setHighScores] = useState<Record<string, number>>(() => {
     const saved = localStorage.getItem('piano_pace_high_scores');
@@ -489,6 +495,7 @@ export default function App() {
   const correctHitsRef = useRef<number>(0);
   const segmentStartHitsRef = useRef<number>(0);
   const segmentStartDurationMsRef = useRef<number>(0);
+  const segmentMeasuresCompletedRef = useRef<number>(0);
 
   useEffect(() => {
     startDateTimeRef.current = startDateTime;
@@ -766,7 +773,10 @@ export default function App() {
   const resetSegmentPace = useCallback(() => {
     segmentStartHitsRef.current = correctHitsRef.current;
     segmentStartDurationMsRef.current = activeDurationMsRef.current;
+    segmentMeasuresCompletedRef.current = 0;
+    lastMeasurePaceRef.current = null;
     setCurrentPace(null);
+    setPaceTrend(null);
   }, []);
 
   useEffect(() => {
@@ -778,36 +788,63 @@ export default function App() {
     const startDateTimeVal = startDateTimeRef.current;
     if (!startDateTimeVal) return;
 
+    segmentMeasuresCompletedRef.current += 1;
+    const measuresCount = segmentMeasuresCompletedRef.current;
+
     const segmentHits = correctHitsRef.current - segmentStartHitsRef.current;
     const segmentDurationMs = activeDurationMsRef.current - segmentStartDurationMsRef.current;
     const segmentDurationSecs = segmentDurationMs / 1000;
 
     if (segmentDurationSecs < 1 || segmentHits <= 0) {
       setCurrentPace(null);
+      setPaceTrend(null);
+      lastMeasurePaceRef.current = null;
       return;
     }
 
-    // Pace = correct notes per minute (NPM) for current segment
+    // Pace = correct notes per minute (NPM) for current segment (live preview)
     const pace = (segmentHits * 60) / segmentDurationSecs;
     setCurrentPace(pace);
 
-    // Update record if beaten for current config
-    const currentRecord = highScoresRef.current[configKey] || 0;
-    if (pace > currentRecord) {
-      const nextHighScores = {
-        ...highScoresRef.current,
-        [configKey]: pace,
-      };
-      highScoresRef.current = nextHighScores;
-      setHighScores(nextHighScores);
-      localStorage.setItem('piano_pace_high_scores', JSON.stringify(nextHighScores));
-      setSessionBeatenKeys(prev => {
-        const next = new Set(prev);
-        next.add(configKey);
-        return next;
-      });
+    // Calculate trend compared to previous measure's pace
+    if (lastMeasurePaceRef.current !== null) {
+      const prevFixed = Number(lastMeasurePaceRef.current.toFixed(1));
+      const currFixed = Number(pace.toFixed(1));
+      if (currFixed > prevFixed) {
+        setPaceTrend('up');
+      } else if (currFixed < prevFixed) {
+        setPaceTrend('down');
+      } else {
+        setPaceTrend('equal');
+      }
+    } else {
+      setPaceTrend('equal');
     }
-  }, [configKey]);
+    lastMeasurePaceRef.current = pace;
+
+    // After 4th measure, and on every subsequent measure (>= 4), check and save/update record
+    if (measuresCount >= 4) {
+      const keyToUse = selectedKeySignature === 'Random' ? activeKeySignatureRef.current : selectedKeySignature;
+      const maxNotesToUse = selectedMaxNotes === 'Random' ? activeMaxNotesRef.current : selectedMaxNotes;
+      const activeConfigKey = `${keyToUse}_${maxNotesToUse}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
+
+      const currentRecord = highScoresRef.current[activeConfigKey] || 0;
+      if (pace > currentRecord) {
+        const nextHighScores = {
+          ...highScoresRef.current,
+          [activeConfigKey]: pace,
+        };
+        highScoresRef.current = nextHighScores;
+        setHighScores(nextHighScores);
+        localStorage.setItem('piano_pace_high_scores', JSON.stringify(nextHighScores));
+        setSessionBeatenKeys(prev => {
+          const next = new Set(prev);
+          next.add(activeConfigKey);
+          return next;
+        });
+      }
+    }
+  }, [selectedKeySignature, selectedMaxNotes, ledgerLines, useAccidentals]);
 
   const saveSessionToHistory = useCallback(() => {
     if (!startDateTime) return;
@@ -858,7 +895,7 @@ export default function App() {
       lastTime = now;
 
       const isDocumentActive = !document.hidden;
-      const isModalOpen = showHistory || showRecordsModal;
+      const isModalOpen = showHistory || showRecordsModal || Boolean(keyChangeAlert);
 
       if (isDocumentActive && !isModalOpen && delta > 0 && delta <= 1500) {
         setActiveDurationMs(prev => {
@@ -875,7 +912,7 @@ export default function App() {
       window.removeEventListener('blur', handleResetTime);
       window.removeEventListener('focus', handleResetTime);
     };
-  }, [isPlaying, showHistory, showRecordsModal]);
+  }, [isPlaying, showHistory, showRecordsModal, keyChangeAlert]);
 
   useEffect(() => {
     localStorage.setItem('piano_note_master_dark_mode', String(isDarkMode));
@@ -900,15 +937,25 @@ export default function App() {
     }
   }, [showHistory]);
 
+  const dismissKeyChangeAlert = useCallback(() => {
+    setKeyChangeAlert(null);
+    keyChangeAlertRef.current = null;
+    segmentStartHitsRef.current = correctHitsRef.current;
+    segmentStartDurationMsRef.current = activeDurationMsRef.current;
+    setCurrentPace(null);
+  }, []);
+
   useEffect(() => {
-    if (keyChangeAlert) {
-      const duration = keyChangeAlert.duration || 4500;
-      const timer = setTimeout(() => {
-        setKeyChangeAlert(null);
-      }, duration);
-      return () => clearTimeout(timer);
-    }
-  }, [keyChangeAlert]);
+    if (!keyChangeAlert) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        dismissKeyChangeAlert();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [keyChangeAlert, dismissKeyChangeAlert]);
 
   const notesRef = useRef<Note[]>([]);
   const currentBeatRef = useRef<number>(0);
@@ -935,7 +982,9 @@ export default function App() {
     let rankText: string | undefined = undefined;
     let rankImproved = false;
 
-    const initialScore = startScoresRef.current[finishedConfigKey] ?? 0;
+    const initialScore = startScoresRef.current[finishedConfigKey] !== undefined
+      ? startScoresRef.current[finishedConfigKey]
+      : (highScoresRef.current[finishedConfigKey] || 0);
     const initialRank = startRanksRef.current[finishedConfigKey] !== undefined
       ? startRanksRef.current[finishedConfigKey]
       : (initialScore > 0 ? getRankForConfig(highScoresRef.current, finishedConfigKey) : null);
@@ -944,11 +993,12 @@ export default function App() {
     if (durationInKeySecs >= 1 && hitsInKey > 0) {
       keyPace = (hitsInKey * 60) / durationInKeySecs;
       const currentScores = highScoresRef.current;
+      const bestScoreInSegment = Math.max(keyPace, currentScores[finishedConfigKey] || 0);
 
-      if (keyPace > initialScore) {
+      if (bestScoreInSegment > initialScore) {
         isNewRecord = true;
         wasFirstRecord = initialScore <= 0;
-        const nextHighScores = { ...currentScores, [finishedConfigKey]: keyPace };
+        const nextHighScores = { ...currentScores, [finishedConfigKey]: bestScoreInSegment };
         highScoresRef.current = nextHighScores;
         setHighScores(nextHighScores);
         localStorage.setItem('piano_pace_high_scores', JSON.stringify(nextHighScores));
@@ -971,7 +1021,7 @@ export default function App() {
           rankText = `#${newRank}`;
         }
 
-        startScoresRef.current[finishedConfigKey] = keyPace;
+        startScoresRef.current[finishedConfigKey] = bestScoreInSegment;
         startRanksRef.current[finishedConfigKey] = newRank;
       } else {
         isNewRecord = false;
@@ -983,9 +1033,12 @@ export default function App() {
       }
     }
 
+    const currentScores = highScoresRef.current;
+    const finalReportedPace = Math.max(keyPace || 0, currentScores[finishedConfigKey] || 0) || keyPace;
+
     return {
       prevKeyName: `${finishedKey} (N${finishedMaxNotes})`,
-      prevKeyPace: keyPace,
+      prevKeyPace: finalReportedPace,
       isNewRecord,
       wasFirstRecord,
       previousRecordPace,
@@ -1015,7 +1068,10 @@ export default function App() {
       setActiveKeySignature(randomKey);
       segmentStartHitsRef.current = correctHitsRef.current;
       segmentStartDurationMsRef.current = activeDurationMsRef.current;
+      segmentMeasuresCompletedRef.current = 0;
+      lastMeasurePaceRef.current = null;
       setCurrentPace(null);
+      setPaceTrend(null);
 
       const nextConfigKey = `${randomKey}_${finishedMaxNotes}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
       const nextScore = highScoresRef.current[nextConfigKey] || 0;
@@ -1024,24 +1080,28 @@ export default function App() {
       startScoresRef.current[nextConfigKey] = nextScore;
       setStartRanks(prev => ({ ...prev, [nextConfigKey]: rankVal }));
 
-      setKeyChangeAlert({
-        id: Date.now(),
-        keyName: `Losowa tonacja: ${randomKey}`,
-        prevKeyName: summary?.prevKeyName,
-        prevKeyPace: summary?.prevKeyPace,
-        isNewRecord: summary?.isNewRecord,
-        wasFirstRecord: summary?.wasFirstRecord,
-        previousRecordPace: summary?.previousRecordPace,
-        rankText: summary?.rankText,
-        rankImproved: summary?.rankImproved,
-        duration: summary ? 6000 : 3500
-      });
+      if (wasPlaying) {
+        setKeyChangeAlert({
+          id: Date.now(),
+          keyName: `Losowa tonacja: ${randomKey}`,
+          prevKeyName: summary?.prevKeyName,
+          prevKeyPace: summary?.prevKeyPace,
+          isNewRecord: summary?.isNewRecord,
+          wasFirstRecord: summary?.wasFirstRecord,
+          previousRecordPace: summary?.previousRecordPace,
+          rankText: summary?.rankText,
+          rankImproved: summary?.rankImproved,
+        });
+      }
     } else {
       activeKeySignatureRef.current = val;
       setActiveKeySignature(val);
       segmentStartHitsRef.current = correctHitsRef.current;
       segmentStartDurationMsRef.current = activeDurationMsRef.current;
+      segmentMeasuresCompletedRef.current = 0;
+      lastMeasurePaceRef.current = null;
       setCurrentPace(null);
+      setPaceTrend(null);
 
       const nextConfigKey = `${val}_${finishedMaxNotes}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
       const nextScore = highScoresRef.current[nextConfigKey] || 0;
@@ -1050,18 +1110,19 @@ export default function App() {
       startScoresRef.current[nextConfigKey] = nextScore;
       setStartRanks(prev => ({ ...prev, [nextConfigKey]: rankVal }));
 
-      setKeyChangeAlert({
-        id: Date.now(),
-        keyName: val,
-        prevKeyName: summary?.prevKeyName,
-        prevKeyPace: summary?.prevKeyPace,
-        isNewRecord: summary?.isNewRecord,
-        wasFirstRecord: summary?.wasFirstRecord,
-        previousRecordPace: summary?.previousRecordPace,
-        rankText: summary?.rankText,
-        rankImproved: summary?.rankImproved,
-        duration: summary ? 6000 : 2500
-      });
+      if (wasPlaying) {
+        setKeyChangeAlert({
+          id: Date.now(),
+          keyName: val,
+          prevKeyName: summary?.prevKeyName,
+          prevKeyPace: summary?.prevKeyPace,
+          isNewRecord: summary?.isNewRecord,
+          wasFirstRecord: summary?.wasFirstRecord,
+          previousRecordPace: summary?.previousRecordPace,
+          rankText: summary?.rankText,
+          rankImproved: summary?.rankImproved,
+        });
+      }
     }
   }, [createFinishedSegmentSummary, ledgerLines, useAccidentals]);
 
@@ -1086,7 +1147,10 @@ export default function App() {
       setActiveMaxNotes(randomNotes);
       segmentStartHitsRef.current = correctHitsRef.current;
       segmentStartDurationMsRef.current = activeDurationMsRef.current;
+      segmentMeasuresCompletedRef.current = 0;
+      lastMeasurePaceRef.current = null;
       setCurrentPace(null);
+      setPaceTrend(null);
 
       const nextConfigKey = `${finishedKey}_${randomNotes}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
       const nextScore = highScoresRef.current[nextConfigKey] || 0;
@@ -1095,25 +1159,29 @@ export default function App() {
       startScoresRef.current[nextConfigKey] = nextScore;
       setStartRanks(prev => ({ ...prev, [nextConfigKey]: rankVal }));
 
-      setKeyChangeAlert({
-        id: Date.now(),
-        keyName: selectedKeySignature === 'Random' ? `Losowa: ${activeKeySignatureRef.current}` : activeKeySignatureRef.current,
-        maxNotesText: `Maks. nut: ${randomNotes} (Losowo)`,
-        prevKeyName: summary?.prevKeyName,
-        prevKeyPace: summary?.prevKeyPace,
-        isNewRecord: summary?.isNewRecord,
-        wasFirstRecord: summary?.wasFirstRecord,
-        previousRecordPace: summary?.previousRecordPace,
-        rankText: summary?.rankText,
-        rankImproved: summary?.rankImproved,
-        duration: summary ? 6000 : 3500
-      });
+      if (wasPlaying) {
+        setKeyChangeAlert({
+          id: Date.now(),
+          keyName: selectedKeySignature === 'Random' ? `Losowa: ${activeKeySignatureRef.current}` : activeKeySignatureRef.current,
+          maxNotesText: `Maks. nut: ${randomNotes} (Losowo)`,
+          prevKeyName: summary?.prevKeyName,
+          prevKeyPace: summary?.prevKeyPace,
+          isNewRecord: summary?.isNewRecord,
+          wasFirstRecord: summary?.wasFirstRecord,
+          previousRecordPace: summary?.previousRecordPace,
+          rankText: summary?.rankText,
+          rankImproved: summary?.rankImproved,
+        });
+      }
     } else {
       activeMaxNotesRef.current = val;
       setActiveMaxNotes(val);
       segmentStartHitsRef.current = correctHitsRef.current;
       segmentStartDurationMsRef.current = activeDurationMsRef.current;
+      segmentMeasuresCompletedRef.current = 0;
+      lastMeasurePaceRef.current = null;
       setCurrentPace(null);
+      setPaceTrend(null);
 
       const nextConfigKey = `${finishedKey}_${val}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
       const nextScore = highScoresRef.current[nextConfigKey] || 0;
@@ -1122,19 +1190,20 @@ export default function App() {
       startScoresRef.current[nextConfigKey] = nextScore;
       setStartRanks(prev => ({ ...prev, [nextConfigKey]: rankVal }));
 
-      setKeyChangeAlert({
-        id: Date.now(),
-        keyName: selectedKeySignature === 'Random' ? `Losowa: ${activeKeySignatureRef.current}` : activeKeySignatureRef.current,
-        maxNotesText: `Maks. nut: ${val}`,
-        prevKeyName: summary?.prevKeyName,
-        prevKeyPace: summary?.prevKeyPace,
-        isNewRecord: summary?.isNewRecord,
-        wasFirstRecord: summary?.wasFirstRecord,
-        previousRecordPace: summary?.previousRecordPace,
-        rankText: summary?.rankText,
-        rankImproved: summary?.rankImproved,
-        duration: summary ? 6000 : 2500
-      });
+      if (wasPlaying) {
+        setKeyChangeAlert({
+          id: Date.now(),
+          keyName: selectedKeySignature === 'Random' ? `Losowa: ${activeKeySignatureRef.current}` : activeKeySignatureRef.current,
+          maxNotesText: `Maks. nut: ${val}`,
+          prevKeyName: summary?.prevKeyName,
+          prevKeyPace: summary?.prevKeyPace,
+          isNewRecord: summary?.isNewRecord,
+          wasFirstRecord: summary?.wasFirstRecord,
+          previousRecordPace: summary?.previousRecordPace,
+          rankText: summary?.rankText,
+          rankImproved: summary?.rankImproved,
+        });
+      }
     }
   }, [createFinishedSegmentSummary, selectedKeySignature, ledgerLines, useAccidentals]);
 
@@ -1198,14 +1267,6 @@ export default function App() {
             previousRecordPace: summary.previousRecordPace,
             rankText: summary.rankText,
             rankImproved: summary.rankImproved,
-            duration: 6000
-          });
-        } else {
-          setKeyChangeAlert({
-            id: Date.now(),
-            keyName: isRandomKey ? `Losowa tonacja: ${nextKey}` : nextKey,
-            maxNotesText: isRandomNotes ? `Maks. nut: ${nextMaxNotes} (Losowo)` : undefined,
-            duration: 3500
           });
         }
 
@@ -1227,7 +1288,10 @@ export default function App() {
 
         segmentStartHitsRef.current = correctHitsRef.current;
         segmentStartDurationMsRef.current = activeDurationMsRef.current;
+        segmentMeasuresCompletedRef.current = 0;
+        lastMeasurePaceRef.current = null;
         setCurrentPace(null);
+        setPaceTrend(null);
       }
     }
     
@@ -1462,7 +1526,7 @@ const getPitchClass = (p: string): number | null => {
     
     let status: 'hit' | 'miss' | 'wrong-octave' | 'default' = 'default';
 
-    if (!isPlaying || showHistory) {
+    if (!isPlaying || showHistory || keyChangeAlertRef.current) {
       setActivePianoNotes(prev => new Map(prev).set(pitch, 'default'));
       setTimeout(() => setActivePianoNotes(prev => {
         const next = new Map(prev);
@@ -1653,7 +1717,12 @@ const getPitchClass = (p: string): number | null => {
     correctHitsRef.current = 0;
     segmentStartHitsRef.current = 0;
     segmentStartDurationMsRef.current = 0;
+    segmentMeasuresCompletedRef.current = 0;
+    lastMeasurePaceRef.current = null;
     setCurrentPace(null);
+    setPaceTrend(null);
+    setKeyChangeAlert(null);
+    keyChangeAlertRef.current = null;
     startRanksRef.current = {};
     startScoresRef.current = {};
     setStartRanks({});
@@ -1685,10 +1754,29 @@ const getPitchClass = (p: string): number | null => {
                 : 'bg-white border border-neutral-200 text-neutral-600'
             }`}>
               <div className="flex items-center gap-1.5">
-                <TrendingUp size={12} className="text-blue-500 animate-pulse" />
+                <TrendingUp size={12} className="text-blue-500 animate-pulse shrink-0" />
                 <span>Aktualne tempo:</span>
-                <strong className={isDarkMode ? 'text-zinc-100 font-extrabold' : 'text-neutral-900 font-extrabold'}>
-                  {currentPace !== null ? `${currentPace.toFixed(1)} NPM` : '—'}
+                <strong className={`flex items-center gap-1 font-extrabold ${isDarkMode ? 'text-zinc-100' : 'text-neutral-900'}`}>
+                  <span>{currentPace !== null ? `${currentPace.toFixed(1)} NPM` : '—'}</span>
+                  {currentPace !== null && paceTrend && (
+                    <span className="inline-flex items-center shrink-0 ml-0.5" title={
+                      paceTrend === 'up'
+                        ? 'Tempo wzrosło w porównaniu do poprzedniego taktu'
+                        : paceTrend === 'down'
+                        ? 'Tempo spadło w porównaniu do poprzedniego taktu'
+                        : 'Tempo bez zmian w porównaniu do poprzedniego taktu'
+                    }>
+                      {paceTrend === 'up' && (
+                        <ArrowUp size={13} className="text-emerald-500 stroke-[3]" />
+                      )}
+                      {paceTrend === 'down' && (
+                        <ArrowDown size={13} className="text-rose-500 stroke-[3]" />
+                      )}
+                      {paceTrend === 'equal' && (
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-neutral-400 dark:bg-zinc-500" />
+                      )}
+                    </span>
+                  )}
                 </strong>
               </div>
               <div className={`w-px h-3 ${isDarkMode ? 'bg-zinc-800' : 'bg-neutral-200'}`} />
@@ -1921,7 +2009,9 @@ const getPitchClass = (p: string): number | null => {
                   correctHitsRef.current = 0;
                   segmentStartHitsRef.current = 0;
                   segmentStartDurationMsRef.current = 0;
+                  lastMeasurePaceRef.current = null;
                   setCurrentPace(null);
+                  setPaceTrend(null);
                   measuresPlayedRef.current = 0;
                   if (startRanksRef.current[configKey] === undefined) {
                     startRanksRef.current[configKey] = currentConfigRank;
@@ -2049,81 +2139,118 @@ const getPitchClass = (p: string): number | null => {
             maxNotes={activeMaxNotes}
           />
 
-          {/* Key Signature Change Announcement Overlay */}
+          {/* Key Signature Change Announcement Overlay - covers full staff to hide notes until dismissed */}
           <AnimatePresence>
             {keyChangeAlert && (
               <motion.div
                 key={`keychange-${keyChangeAlert.id}`}
-                initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                transition={{ type: 'spring', damping: 18, stiffness: 150 }}
-                className="absolute top-2 left-4 right-4 md:left-auto md:right-4 p-3 rounded-xl bg-amber-500/90 dark:bg-amber-600/90 text-white backdrop-blur-md shadow-lg border border-amber-300/50 z-30 flex flex-col gap-1.5 max-w-sm pointer-events-none"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ type: 'spring', damping: 22, stiffness: 260 }}
+                className="absolute inset-0 z-40 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-zinc-950/95 dark:bg-zinc-950/98 backdrop-blur-md rounded-xl border-2 border-amber-500/50 shadow-2xl overflow-y-auto"
               >
-                <div className="flex items-center justify-between gap-3 w-full">
-                  <div className="flex items-center gap-2">
-                    <Music className="w-4 h-4 text-amber-100 shrink-0" />
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[10px] uppercase font-bold tracking-wider text-amber-100">
-                        Tonacja:
-                      </span>
-                      <span className="text-sm font-bold leading-none">
-                        {keyChangeAlert.keyName}
-                      </span>
-                      {keyChangeAlert.maxNotesText && (
-                        <span className="text-[11px] bg-amber-950/40 text-amber-100 font-bold px-2 py-0.5 rounded-full ml-1 border border-amber-300/30">
-                          {keyChangeAlert.maxNotesText}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Finishing Key Performance Summary */}
-                {keyChangeAlert.prevKeyName && (
-                  <div className="w-full pt-1.5 border-t border-amber-300/30 flex flex-col gap-1.5 text-[11px] text-amber-50">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium text-amber-100 truncate">
-                        Poprzednio ({keyChangeAlert.prevKeyName}):
-                      </span>
-                      <strong className="font-mono font-bold text-white text-xs shrink-0">
-                        {keyChangeAlert.prevKeyPace !== undefined && keyChangeAlert.prevKeyPace !== null
-                          ? `${keyChangeAlert.prevKeyPace.toFixed(1)} NPM`
-                          : '—'}
-                      </strong>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2 flex-wrap pt-0.5">
-                      {/* Status czy rekord został pobity */}
-                      <div className="flex items-center gap-1.5">
-                        {keyChangeAlert.isNewRecord ? (
-                          <span className="px-2 py-0.5 rounded-md bg-emerald-400 text-black text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-xs">
-                            🏆 {keyChangeAlert.wasFirstRecord ? 'Nowy rekord!' : 'Rekord pobity!'}
-                          </span>
-                        ) : keyChangeAlert.prevKeyPace !== null && keyChangeAlert.prevKeyPace !== undefined ? (
-                          <span className="px-1.5 py-0.5 rounded-md bg-amber-950/40 text-amber-200 text-[10px] font-medium border border-amber-400/30">
-                            Nie pobito {keyChangeAlert.previousRecordPace ? `(rekord: ${keyChangeAlert.previousRecordPace.toFixed(1)} NPM)` : ''}
-                          </span>
-                        ) : null}
+                <div className="relative w-full max-w-sm sm:max-w-md p-3.5 sm:p-5 rounded-2xl bg-zinc-900/95 border border-amber-500/40 text-white shadow-2xl flex flex-col gap-2.5 sm:gap-3.5 my-auto pointer-events-auto">
+                  {/* Top Bar with Title and Close 'X' Button */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="p-2 rounded-xl bg-amber-500/20 border border-amber-400/40 text-amber-400 shrink-0">
+                        <Music className="w-5 h-5" />
                       </div>
-
-                      {/* Z którego miejsca na które rekord zawędrował */}
-                      {keyChangeAlert.rankText && (
-                        <div className="flex items-center gap-1 font-mono font-black text-[10px] bg-black/25 text-amber-200 px-2 py-0.5 rounded-md border border-amber-300/30 shadow-xs ml-auto">
-                          <span className="text-[9px] font-sans font-medium text-amber-200/80 mr-0.5 uppercase tracking-wider">
-                            Miejsce:
-                          </span>
-                          <span>{keyChangeAlert.rankText}</span>
-                          {keyChangeAlert.rankImproved && (
-                            <span className="text-emerald-300 font-black text-xs leading-none">
-                              ▲
+                      <div className="min-w-0">
+                        <div className="text-[10px] uppercase font-bold tracking-wider text-amber-400">
+                          Nowa tonacja i parametry
+                        </div>
+                        <div className="text-base sm:text-lg font-black text-white flex items-center gap-1.5 sm:gap-2 flex-wrap truncate">
+                          <span>{keyChangeAlert.keyName}</span>
+                          {keyChangeAlert.maxNotesText && (
+                            <span className="text-[11px] bg-amber-500/20 text-amber-300 font-bold px-2 py-0.5 rounded-full border border-amber-400/30">
+                              {keyChangeAlert.maxNotesText}
                             </span>
                           )}
                         </div>
-                      )}
+                      </div>
                     </div>
+
+                    {/* Close (X) button */}
+                    <button
+                      onClick={dismissKeyChangeAlert}
+                      className="p-1.5 sm:p-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:scale-95 text-zinc-300 hover:text-white border border-zinc-700 transition-all shrink-0 cursor-pointer"
+                      title="Zamknij i rozpocznij (Esc / Enter / Spacja)"
+                      aria-label="Zamknij i rozpocznij"
+                    >
+                      <X size={18} />
+                    </button>
                   </div>
-                )}
+
+                  {/* Finishing Key Performance Summary */}
+                  {keyChangeAlert.prevKeyName && (
+                    <div className="w-full p-2.5 sm:p-3 rounded-xl bg-zinc-950/80 border border-zinc-800 flex flex-col gap-1.5 sm:gap-2 text-xs text-zinc-200">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                        Podsumowanie poprzedniej tonacji
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-zinc-300">
+                          Tonacja: <span className="text-white font-bold">{keyChangeAlert.prevKeyName}</span>
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] uppercase font-bold text-zinc-400">Prędkość:</span>
+                          <strong className="font-mono font-black text-amber-400 text-xs sm:text-sm">
+                            {keyChangeAlert.prevKeyPace !== undefined && keyChangeAlert.prevKeyPace !== null
+                              ? `${keyChangeAlert.prevKeyPace.toFixed(1)} NPM`
+                              : '—'}
+                          </strong>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 flex-wrap pt-1.5 border-t border-zinc-800/80">
+                        {/* Status czy rekord został pobity */}
+                        <div className="flex items-center gap-1.5">
+                          {keyChangeAlert.isNewRecord ? (
+                            <span className="px-2 py-0.5 rounded-md bg-emerald-400 text-black text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-xs">
+                              🏆 {keyChangeAlert.wasFirstRecord ? 'Nowy rekord!' : 'Rekord pobity!'}
+                            </span>
+                          ) : keyChangeAlert.prevKeyPace !== null && keyChangeAlert.prevKeyPace !== undefined ? (
+                            <span className="px-1.5 py-0.5 rounded-md bg-zinc-800 text-zinc-300 text-[10px] font-medium border border-zinc-700">
+                              Nie pobito {keyChangeAlert.previousRecordPace ? `(rekord: ${keyChangeAlert.previousRecordPace.toFixed(1)} NPM)` : ''}
+                            </span>
+                          ) : null}
+                        </div>
+
+                        {/* Z którego miejsca na które rekord zawędrował */}
+                        {keyChangeAlert.rankText && (
+                          <div className="flex items-center gap-1 font-mono font-black text-[10px] bg-zinc-800/90 text-amber-300 px-2 py-0.5 rounded-md border border-zinc-700 ml-auto">
+                            <span className="text-[9px] font-sans font-medium text-zinc-400 mr-0.5 uppercase tracking-wider">
+                              Miejsce:
+                            </span>
+                            <span>{keyChangeAlert.rankText}</span>
+                            {keyChangeAlert.rankImproved && (
+                              <span className="text-emerald-400 font-black text-xs leading-none">
+                                ▲
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Informational tip */}
+                  <div className="text-[11px] text-zinc-400 flex items-center gap-1.5">
+                    <Clock size={13} className="text-amber-400 shrink-0" />
+                    <span>Czas dla nowej tonacji zacznie się liczyć po kliknięciu krzyżyka lub przycisku poniżej.</span>
+                  </div>
+
+                  {/* Prominent Action Button */}
+                  <button
+                    onClick={dismissKeyChangeAlert}
+                    className="w-full py-2 sm:py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 active:scale-[0.99] text-zinc-950 font-black text-xs sm:text-sm tracking-wide shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                  >
+                    <span>Rozpocznij nową tonację</span>
+                    <span className="text-[10px] bg-black/20 text-zinc-950 px-1.5 py-0.5 rounded-md font-mono font-bold">✕</span>
+                  </button>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
