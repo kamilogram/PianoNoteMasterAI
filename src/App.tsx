@@ -373,6 +373,7 @@ export default function App() {
   const [correctHits, setCorrectHits] = useState<number>(0);
   const [currentPace, setCurrentPace] = useState<number | null>(null);
   const [paceTrend, setPaceTrend] = useState<'up' | 'down' | 'equal' | null>(null);
+  const [segmentMeasuresCompleted, setSegmentMeasuresCompleted] = useState<number>(0);
   const lastMeasurePaceRef = useRef<number | null>(null);
   const [sessionBeatenKeys, setSessionBeatenKeys] = useState<Set<string>>(new Set());
   const [highScores, setHighScores] = useState<Record<string, number>>(() => {
@@ -684,6 +685,15 @@ export default function App() {
     return index !== -1 ? index + 1 : null;
   }, [allValidRecords, configKey, configRecord]);
 
+  const projectedRank = useMemo(() => {
+    if (currentPace === null || currentPace <= 0) return null;
+    const simScores: Record<string, number> = {
+      ...highScores,
+      [configKey]: Math.max(currentPace, highScores[configKey] || 0)
+    };
+    return getRankForConfig(simScores, configKey);
+  }, [currentPace, highScores, configKey]);
+
   const initialRank = useMemo(() => {
     if (startRanks[configKey] !== undefined) {
       return startRanks[configKey];
@@ -774,6 +784,7 @@ export default function App() {
     segmentStartHitsRef.current = correctHitsRef.current;
     segmentStartDurationMsRef.current = activeDurationMsRef.current;
     segmentMeasuresCompletedRef.current = 0;
+    setSegmentMeasuresCompleted(0);
     lastMeasurePaceRef.current = null;
     setCurrentPace(null);
     setPaceTrend(null);
@@ -790,6 +801,7 @@ export default function App() {
 
     segmentMeasuresCompletedRef.current += 1;
     const measuresCount = segmentMeasuresCompletedRef.current;
+    setSegmentMeasuresCompleted(measuresCount);
 
     const segmentHits = correctHitsRef.current - segmentStartHitsRef.current;
     const segmentDurationMs = activeDurationMsRef.current - segmentStartDurationMsRef.current;
@@ -1069,6 +1081,7 @@ export default function App() {
       segmentStartHitsRef.current = correctHitsRef.current;
       segmentStartDurationMsRef.current = activeDurationMsRef.current;
       segmentMeasuresCompletedRef.current = 0;
+      setSegmentMeasuresCompleted(0);
       lastMeasurePaceRef.current = null;
       setCurrentPace(null);
       setPaceTrend(null);
@@ -1099,6 +1112,7 @@ export default function App() {
       segmentStartHitsRef.current = correctHitsRef.current;
       segmentStartDurationMsRef.current = activeDurationMsRef.current;
       segmentMeasuresCompletedRef.current = 0;
+      setSegmentMeasuresCompleted(0);
       lastMeasurePaceRef.current = null;
       setCurrentPace(null);
       setPaceTrend(null);
@@ -1148,6 +1162,7 @@ export default function App() {
       segmentStartHitsRef.current = correctHitsRef.current;
       segmentStartDurationMsRef.current = activeDurationMsRef.current;
       segmentMeasuresCompletedRef.current = 0;
+      setSegmentMeasuresCompleted(0);
       lastMeasurePaceRef.current = null;
       setCurrentPace(null);
       setPaceTrend(null);
@@ -1179,6 +1194,7 @@ export default function App() {
       segmentStartHitsRef.current = correctHitsRef.current;
       segmentStartDurationMsRef.current = activeDurationMsRef.current;
       segmentMeasuresCompletedRef.current = 0;
+      setSegmentMeasuresCompleted(0);
       lastMeasurePaceRef.current = null;
       setCurrentPace(null);
       setPaceTrend(null);
@@ -1289,6 +1305,7 @@ export default function App() {
         segmentStartHitsRef.current = correctHitsRef.current;
         segmentStartDurationMsRef.current = activeDurationMsRef.current;
         segmentMeasuresCompletedRef.current = 0;
+        setSegmentMeasuresCompleted(0);
         lastMeasurePaceRef.current = null;
         setCurrentPace(null);
         setPaceTrend(null);
@@ -1718,6 +1735,7 @@ const getPitchClass = (p: string): number | null => {
     segmentStartHitsRef.current = 0;
     segmentStartDurationMsRef.current = 0;
     segmentMeasuresCompletedRef.current = 0;
+    setSegmentMeasuresCompleted(0);
     lastMeasurePaceRef.current = null;
     setCurrentPace(null);
     setPaceTrend(null);
@@ -1784,43 +1802,54 @@ const getPitchClass = (p: string): number | null => {
                 onClick={() => setShowRecordsModal(true)}
                 className="flex items-center gap-1.5 hover:opacity-90 cursor-pointer group transition-all"
                 title={
-                  currentConfigRank
-                    ? `Kliknij, aby zobaczyć tabelę rekordów (pozycja #${currentConfigRank} z ${allValidRecords.length} zapisanych rekordów${
-                        initialRank && initialRank !== currentConfigRank ? `, na starcie: #${initialRank}` : ''
-                      })`
-                    : 'Kliknij, aby zobaczyć i zarządzać wszystkimi rekordami prędkości'
+                  (() => {
+                    const effectiveRank = (currentPace !== null && projectedRank !== null) ? projectedRank : currentConfigRank;
+                    if (currentPace !== null && segmentMeasuresCompleted > 0 && segmentMeasuresCompleted < 4 && projectedRank !== null) {
+                      return `Aktualne tempo (${currentPace.toFixed(1)} NPM) daje pozycję #${projectedRank} w tabeli. Rekord zapisze się po 4. takcie.`;
+                    }
+                    if (effectiveRank) {
+                      return `Pozycja #${effectiveRank} z ${allValidRecords.length} zapisanych rekordów. Kliknij, aby otworzyć tabelę.`;
+                    }
+                    return 'Kliknij, aby zobaczyć i zarządzać wszystkimi rekordami prędkości';
+                  })()
                 }
               >
                 <Trophy size={12} className="text-amber-500 group-hover:scale-110 transition-transform shrink-0" />
                 <span className="flex items-center gap-1.5 flex-wrap">
                   <span className="font-semibold text-xs">Rekord parametrów:</span>
-                  {currentConfigRank ? (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-400 text-black font-black text-[11px] shadow-xs tracking-tight">
-                      {initialRank && initialRank !== currentConfigRank ? (
-                        <>
-                          <span>#{initialRank} -&gt; #{currentConfigRank}</span>
-                          {currentConfigRank < initialRank && (
-                            <span className="text-emerald-950 font-black text-xs leading-none" title="Awans w rankingu!">
-                              ▲
-                            </span>
+                  {(() => {
+                    const effectiveRank = (currentPace !== null && projectedRank !== null) ? projectedRank : currentConfigRank;
+                    if (effectiveRank) {
+                      return (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-400 text-black font-black text-[11px] shadow-xs tracking-tight">
+                          {initialRank && initialRank !== effectiveRank ? (
+                            <>
+                              <span>#{initialRank} -&gt; #{effectiveRank}</span>
+                              {effectiveRank < initialRank && (
+                                <span className="text-emerald-950 font-black text-xs leading-none" title="Awans w rankingu!">
+                                  ▲
+                                </span>
+                              )}
+                            </>
+                          ) : initialRank === null && effectiveRank ? (
+                            <>
+                              <span>brak -&gt; #{effectiveRank}</span>
+                              <span className="text-emerald-950 font-black text-xs leading-none" title="Nowy rekord w rankingu!">
+                                ▲
+                              </span>
+                            </>
+                          ) : (
+                            <span>#{effectiveRank}</span>
                           )}
-                        </>
-                      ) : initialRank === null && currentConfigRank ? (
-                        <>
-                          <span>brak -&gt; #{currentConfigRank}</span>
-                          <span className="text-emerald-950 font-black text-xs leading-none" title="Nowy rekord w rankingu!">
-                            ▲
-                          </span>
-                        </>
-                      ) : (
-                        <span>#{currentConfigRank}</span>
-                      )}
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-neutral-200 dark:bg-zinc-800 text-black dark:text-zinc-100 font-bold text-[11px]">
-                      <span>brak</span>
-                    </span>
-                  )}
+                        </span>
+                      );
+                    }
+                    return (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-neutral-200 dark:bg-zinc-800 text-black dark:text-zinc-100 font-bold text-[11px]">
+                        <span>brak</span>
+                      </span>
+                    );
+                  })()}
                 </span>
                 <strong className={`font-extrabold text-xs ml-0.5 ${
                   sessionBeatenKeys.has(configKey)
@@ -2009,6 +2038,8 @@ const getPitchClass = (p: string): number | null => {
                   correctHitsRef.current = 0;
                   segmentStartHitsRef.current = 0;
                   segmentStartDurationMsRef.current = 0;
+                  segmentMeasuresCompletedRef.current = 0;
+                  setSegmentMeasuresCompleted(0);
                   lastMeasurePaceRef.current = null;
                   setCurrentPace(null);
                   setPaceTrend(null);
