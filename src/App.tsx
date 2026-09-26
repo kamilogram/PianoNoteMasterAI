@@ -820,8 +820,8 @@ export default function App() {
 
     // Calculate trend compared to previous measure's pace
     if (lastMeasurePaceRef.current !== null) {
-      const prevFixed = Number(lastMeasurePaceRef.current.toFixed(1));
-      const currFixed = Number(pace.toFixed(1));
+      const prevFixed = Number(lastMeasurePaceRef.current.toFixed(2));
+      const currFixed = Number(pace.toFixed(2));
       if (currFixed > prevFixed) {
         setPaceTrend('up');
       } else if (currFixed < prevFixed) {
@@ -1775,7 +1775,7 @@ const getPitchClass = (p: string): number | null => {
                 <TrendingUp size={12} className="text-blue-500 animate-pulse shrink-0" />
                 <span>Aktualne tempo:</span>
                 <strong className={`flex items-center gap-1 font-extrabold ${isDarkMode ? 'text-zinc-100' : 'text-neutral-900'}`}>
-                  <span>{currentPace !== null ? `${currentPace.toFixed(1)} NPM` : '—'}</span>
+                  <span>{currentPace !== null ? `${currentPace.toFixed(2)} NPM` : '—'}</span>
                   {currentPace !== null && paceTrend && (
                     <span className="inline-flex items-center shrink-0 ml-0.5" title={
                       paceTrend === 'up'
@@ -1805,7 +1805,7 @@ const getPitchClass = (p: string): number | null => {
                   (() => {
                     const effectiveRank = (currentPace !== null && projectedRank !== null) ? projectedRank : currentConfigRank;
                     if (currentPace !== null && segmentMeasuresCompleted > 0 && segmentMeasuresCompleted < 4 && projectedRank !== null) {
-                      return `Aktualne tempo (${currentPace.toFixed(1)} NPM) daje pozycję #${projectedRank} w tabeli. Rekord zapisze się po 4. takcie.`;
+                      return `Aktualne tempo (${currentPace.toFixed(2)} NPM) daje pozycję #${projectedRank} w tabeli. Rekord zapisze się po 4. takcie.`;
                     }
                     if (effectiveRank) {
                       return `Pozycja #${effectiveRank} z ${allValidRecords.length} zapisanych rekordów. Kliknij, aby otworzyć tabelę.`;
@@ -1856,7 +1856,7 @@ const getPitchClass = (p: string): number | null => {
                     ? 'text-emerald-600 dark:text-emerald-400 animate-pulse'
                     : (isDarkMode ? 'text-zinc-200' : 'text-neutral-800')
                 }`}>
-                  {configRecord > 0 ? `${configRecord.toFixed(1)} NPM` : '—'}
+                  {configRecord > 0 ? `${configRecord.toFixed(2)} NPM` : '—'}
                 </strong>
               </button>
             </div>
@@ -2229,7 +2229,7 @@ const getPitchClass = (p: string): number | null => {
                           <span className="text-[10px] uppercase font-bold text-zinc-400">Prędkość:</span>
                           <strong className="font-mono font-black text-amber-400 text-xs sm:text-sm">
                             {keyChangeAlert.prevKeyPace !== undefined && keyChangeAlert.prevKeyPace !== null
-                              ? `${keyChangeAlert.prevKeyPace.toFixed(1)} NPM`
+                              ? `${keyChangeAlert.prevKeyPace.toFixed(2)} NPM`
                               : '—'}
                           </strong>
                         </div>
@@ -2244,7 +2244,7 @@ const getPitchClass = (p: string): number | null => {
                             </span>
                           ) : keyChangeAlert.prevKeyPace !== null && keyChangeAlert.prevKeyPace !== undefined ? (
                             <span className="px-1.5 py-0.5 rounded-md bg-zinc-800 text-zinc-300 text-[10px] font-medium border border-zinc-700">
-                              Nie pobito {keyChangeAlert.previousRecordPace ? `(rekord: ${keyChangeAlert.previousRecordPace.toFixed(1)} NPM)` : ''}
+                              Nie pobito {keyChangeAlert.previousRecordPace ? `(rekord: ${keyChangeAlert.previousRecordPace.toFixed(2)} NPM)` : ''}
                             </span>
                           ) : null}
                         </div>
@@ -2821,7 +2821,7 @@ const getPitchClass = (p: string): number | null => {
                                   ? 'text-emerald-600 dark:text-emerald-400'
                                   : (isDarkMode ? 'text-zinc-200' : 'text-neutral-800')
                               }`}>
-                                {scoreVal.toFixed(1)} NPM
+                                {scoreVal.toFixed(2)} NPM
                               </span>
                             </div>
 
