@@ -292,9 +292,25 @@ export default function App() {
     const saved = localStorage.getItem('piano_ledger_lines');
     return saved !== null ? parseInt(saved, 10) : 2;
   });
-  const [useAccidentals, setUseAccidentals] = useState<boolean>(() => {
-    return localStorage.getItem('piano_use_accidentals') === 'true';
+  const [selectedAccidentals, setSelectedAccidentals] = useState<boolean | 'Random'>(() => {
+    const saved = localStorage.getItem('piano_selected_accidentals');
+    if (saved === 'Random') return 'Random';
+    if (saved === 'true') return true;
+    if (saved === 'false') return false;
+    const legacy = localStorage.getItem('piano_use_accidentals');
+    if (legacy !== null) return legacy === 'true';
+    return false;
   });
+  const [activeUseAccidentals, setActiveUseAccidentals] = useState<boolean>(() => {
+    const saved = localStorage.getItem('piano_selected_accidentals');
+    if (saved === 'true') return true;
+    if (saved === 'false') return false;
+    const legacy = localStorage.getItem('piano_use_accidentals');
+    if (legacy !== null) return legacy === 'true';
+    return false;
+  });
+  const activeUseAccidentalsRef = useRef<boolean>(activeUseAccidentals);
+
   const [selectedMaxNotes, setSelectedMaxNotes] = useState<number | 'Random'>(() => {
     const saved = localStorage.getItem('piano_selected_max_notes');
     if (saved === 'Random') return 'Random';
@@ -347,6 +363,7 @@ export default function App() {
     id: number;
     keyName: string;
     maxNotesText?: string;
+    accidentalsText?: string;
     prevKeyName?: string;
     prevKeyPace?: number | null;
     isNewRecord?: boolean;
@@ -670,7 +687,8 @@ export default function App() {
 
   const keyToUse = selectedKeySignature === 'Random' ? activeKeySignature : selectedKeySignature;
   const maxNotesToUse = selectedMaxNotes === 'Random' ? activeMaxNotes : selectedMaxNotes;
-  const configKey = `${keyToUse}_${maxNotesToUse}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
+  const accidentalsToUse = selectedAccidentals === 'Random' ? activeUseAccidentals : selectedAccidentals;
+  const configKey = `${keyToUse}_${maxNotesToUse}_${ledgerLines}_${accidentalsToUse ? 'acc' : 'noacc'}`;
   const configRecord = highScores[configKey] || 0;
 
   const allValidRecords = useMemo(() => {
@@ -764,8 +782,9 @@ export default function App() {
   }, [ledgerLines]);
 
   useEffect(() => {
-    localStorage.setItem('piano_use_accidentals', String(useAccidentals));
-  }, [useAccidentals]);
+    localStorage.setItem('piano_selected_accidentals', String(selectedAccidentals));
+    localStorage.setItem('piano_use_accidentals', String(activeUseAccidentals));
+  }, [selectedAccidentals, activeUseAccidentals]);
 
   useEffect(() => {
     localStorage.setItem('piano_selected_max_notes', String(selectedMaxNotes));
@@ -793,7 +812,7 @@ export default function App() {
   useEffect(() => {
     // Reset segment-specific pace variables on parameter changes
     resetSegmentPace();
-  }, [selectedKeySignature, selectedMaxNotes, ledgerLines, useAccidentals, resetSegmentPace]);
+  }, [selectedKeySignature, selectedMaxNotes, selectedAccidentals, ledgerLines, resetSegmentPace]);
 
   const calculateAndSavePace = useCallback(() => {
     const startDateTimeVal = startDateTimeRef.current;
@@ -838,7 +857,8 @@ export default function App() {
     if (measuresCount >= 4) {
       const keyToUse = selectedKeySignature === 'Random' ? activeKeySignatureRef.current : selectedKeySignature;
       const maxNotesToUse = selectedMaxNotes === 'Random' ? activeMaxNotesRef.current : selectedMaxNotes;
-      const activeConfigKey = `${keyToUse}_${maxNotesToUse}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
+      const accidentalsToUse = selectedAccidentals === 'Random' ? activeUseAccidentalsRef.current : selectedAccidentals;
+      const activeConfigKey = `${keyToUse}_${maxNotesToUse}_${ledgerLines}_${accidentalsToUse ? 'acc' : 'noacc'}`;
 
       const currentRecord = highScoresRef.current[activeConfigKey] || 0;
       if (pace > currentRecord) {
@@ -856,7 +876,7 @@ export default function App() {
         });
       }
     }
-  }, [selectedKeySignature, selectedMaxNotes, ledgerLines, useAccidentals]);
+  }, [selectedKeySignature, selectedMaxNotes, selectedAccidentals, ledgerLines]);
 
   const saveSessionToHistory = useCallback(() => {
     if (!startDateTime) return;
@@ -982,8 +1002,8 @@ export default function App() {
     return () => mql.removeEventListener('change', checkCompact);
   }, []);
 
-  const createFinishedSegmentSummary = useCallback((finishedKey: string, finishedMaxNotes: number) => {
-    const finishedConfigKey = `${finishedKey}_${finishedMaxNotes}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
+  const createFinishedSegmentSummary = useCallback((finishedKey: string, finishedMaxNotes: number, finishedUseAccidentals: boolean) => {
+    const finishedConfigKey = `${finishedKey}_${finishedMaxNotes}_${ledgerLines}_${finishedUseAccidentals ? 'acc' : 'noacc'}`;
     const hitsInKey = correctHitsRef.current - segmentStartHitsRef.current;
     const durationInKeyMs = activeDurationMsRef.current - segmentStartDurationMsRef.current;
     const durationInKeySecs = durationInKeyMs / 1000;
@@ -1048,8 +1068,9 @@ export default function App() {
     const currentScores = highScoresRef.current;
     const finalReportedPace = Math.max(keyPace || 0, currentScores[finishedConfigKey] || 0) || keyPace;
 
+    const accLabel = finishedUseAccidentals ? 'ze znakami' : 'bez znaków';
     return {
-      prevKeyName: `${finishedKey} (N${finishedMaxNotes})`,
+      prevKeyName: `${finishedKey} (N${finishedMaxNotes}, ${accLabel})`,
       prevKeyPace: finalReportedPace,
       isNewRecord,
       wasFirstRecord,
@@ -1057,20 +1078,23 @@ export default function App() {
       rankText,
       rankImproved
     };
-  }, [ledgerLines, useAccidentals]);
+  }, [ledgerLines]);
 
   const handleKeySignatureChange = useCallback((val: keyof typeof KEY_SIGNATURES | 'Random') => {
     setSelectedKeySignature(val);
     const wasPlaying = isPlayingRef.current;
     const finishedKey = activeKeySignatureRef.current;
     const finishedMaxNotes = activeMaxNotesRef.current;
+    const finishedAccidentals = activeUseAccidentalsRef.current;
     const hitsInKey = correctHitsRef.current - segmentStartHitsRef.current;
     const durationInKeyMs = activeDurationMsRef.current - segmentStartDurationMsRef.current;
 
     let summary: ReturnType<typeof createFinishedSegmentSummary> | null = null;
     if (wasPlaying && hitsInKey > 0 && durationInKeyMs >= 1000) {
-      summary = createFinishedSegmentSummary(finishedKey, finishedMaxNotes);
+      summary = createFinishedSegmentSummary(finishedKey, finishedMaxNotes, finishedAccidentals);
     }
+
+    const accidentalsToUse = selectedAccidentals === 'Random' ? activeUseAccidentalsRef.current : selectedAccidentals;
 
     if (val === 'Random') {
       measuresPlayedRef.current = 0;
@@ -1086,7 +1110,7 @@ export default function App() {
       setCurrentPace(null);
       setPaceTrend(null);
 
-      const nextConfigKey = `${randomKey}_${finishedMaxNotes}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
+      const nextConfigKey = `${randomKey}_${finishedMaxNotes}_${ledgerLines}_${accidentalsToUse ? 'acc' : 'noacc'}`;
       const nextScore = highScoresRef.current[nextConfigKey] || 0;
       const rankVal = getRankForConfig(highScoresRef.current, nextConfigKey);
       startRanksRef.current[nextConfigKey] = rankVal;
@@ -1117,7 +1141,7 @@ export default function App() {
       setCurrentPace(null);
       setPaceTrend(null);
 
-      const nextConfigKey = `${val}_${finishedMaxNotes}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
+      const nextConfigKey = `${val}_${finishedMaxNotes}_${ledgerLines}_${accidentalsToUse ? 'acc' : 'noacc'}`;
       const nextScore = highScoresRef.current[nextConfigKey] || 0;
       const rankVal = getRankForConfig(highScoresRef.current, nextConfigKey);
       startRanksRef.current[nextConfigKey] = rankVal;
@@ -1138,20 +1162,23 @@ export default function App() {
         });
       }
     }
-  }, [createFinishedSegmentSummary, ledgerLines, useAccidentals]);
+  }, [createFinishedSegmentSummary, ledgerLines, selectedAccidentals]);
 
   const handleMaxNotesChange = useCallback((val: number | 'Random') => {
     setSelectedMaxNotes(val);
     const wasPlaying = isPlayingRef.current;
     const finishedKey = activeKeySignatureRef.current;
     const finishedMaxNotes = activeMaxNotesRef.current;
+    const finishedAccidentals = activeUseAccidentalsRef.current;
     const hitsInKey = correctHitsRef.current - segmentStartHitsRef.current;
     const durationInKeyMs = activeDurationMsRef.current - segmentStartDurationMsRef.current;
 
     let summary: ReturnType<typeof createFinishedSegmentSummary> | null = null;
     if (wasPlaying && hitsInKey > 0 && durationInKeyMs >= 1000) {
-      summary = createFinishedSegmentSummary(finishedKey, finishedMaxNotes);
+      summary = createFinishedSegmentSummary(finishedKey, finishedMaxNotes, finishedAccidentals);
     }
+
+    const accidentalsToUse = selectedAccidentals === 'Random' ? activeUseAccidentalsRef.current : selectedAccidentals;
 
     if (val === 'Random') {
       measuresPlayedRef.current = 0;
@@ -1167,7 +1194,7 @@ export default function App() {
       setCurrentPace(null);
       setPaceTrend(null);
 
-      const nextConfigKey = `${finishedKey}_${randomNotes}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
+      const nextConfigKey = `${finishedKey}_${randomNotes}_${ledgerLines}_${accidentalsToUse ? 'acc' : 'noacc'}`;
       const nextScore = highScoresRef.current[nextConfigKey] || 0;
       const rankVal = getRankForConfig(highScoresRef.current, nextConfigKey);
       startRanksRef.current[nextConfigKey] = rankVal;
@@ -1199,7 +1226,7 @@ export default function App() {
       setCurrentPace(null);
       setPaceTrend(null);
 
-      const nextConfigKey = `${finishedKey}_${val}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
+      const nextConfigKey = `${finishedKey}_${val}_${ledgerLines}_${accidentalsToUse ? 'acc' : 'noacc'}`;
       const nextScore = highScoresRef.current[nextConfigKey] || 0;
       const rankVal = getRankForConfig(highScoresRef.current, nextConfigKey);
       startRanksRef.current[nextConfigKey] = rankVal;
@@ -1221,7 +1248,92 @@ export default function App() {
         });
       }
     }
-  }, [createFinishedSegmentSummary, selectedKeySignature, ledgerLines, useAccidentals]);
+  }, [createFinishedSegmentSummary, selectedKeySignature, ledgerLines, selectedAccidentals]);
+
+  const handleAccidentalsChange = useCallback((val: boolean | 'Random') => {
+    setSelectedAccidentals(val);
+    const wasPlaying = isPlayingRef.current;
+    const finishedKey = activeKeySignatureRef.current;
+    const finishedMaxNotes = activeMaxNotesRef.current;
+    const finishedAccidentals = activeUseAccidentalsRef.current;
+    const hitsInKey = correctHitsRef.current - segmentStartHitsRef.current;
+    const durationInKeyMs = activeDurationMsRef.current - segmentStartDurationMsRef.current;
+
+    let summary: ReturnType<typeof createFinishedSegmentSummary> | null = null;
+    if (wasPlaying && hitsInKey > 0 && durationInKeyMs >= 1000) {
+      summary = createFinishedSegmentSummary(finishedKey, finishedMaxNotes, finishedAccidentals);
+    }
+
+    if (val === 'Random') {
+      measuresPlayedRef.current = 0;
+      const randomAcc = Math.random() < 0.5;
+      activeUseAccidentalsRef.current = randomAcc;
+      setActiveUseAccidentals(randomAcc);
+      segmentStartHitsRef.current = correctHitsRef.current;
+      segmentStartDurationMsRef.current = activeDurationMsRef.current;
+      segmentMeasuresCompletedRef.current = 0;
+      setSegmentMeasuresCompleted(0);
+      lastMeasurePaceRef.current = null;
+      setCurrentPace(null);
+      setPaceTrend(null);
+
+      const nextConfigKey = `${finishedKey}_${finishedMaxNotes}_${ledgerLines}_${randomAcc ? 'acc' : 'noacc'}`;
+      const nextScore = highScoresRef.current[nextConfigKey] || 0;
+      const rankVal = getRankForConfig(highScoresRef.current, nextConfigKey);
+      startRanksRef.current[nextConfigKey] = rankVal;
+      startScoresRef.current[nextConfigKey] = nextScore;
+      setStartRanks(prev => ({ ...prev, [nextConfigKey]: rankVal }));
+
+      if (wasPlaying) {
+        setKeyChangeAlert({
+          id: Date.now(),
+          keyName: selectedKeySignature === 'Random' ? `Losowa: ${activeKeySignatureRef.current}` : activeKeySignatureRef.current,
+          maxNotesText: selectedMaxNotes === 'Random' ? `Maks. nut: ${activeMaxNotesRef.current}` : undefined,
+          accidentalsText: `Znaki: ${randomAcc ? 'WŁ' : 'WYŁ'} (Losowo)`,
+          prevKeyName: summary?.prevKeyName,
+          prevKeyPace: summary?.prevKeyPace,
+          isNewRecord: summary?.isNewRecord,
+          wasFirstRecord: summary?.wasFirstRecord,
+          previousRecordPace: summary?.previousRecordPace,
+          rankText: summary?.rankText,
+          rankImproved: summary?.rankImproved,
+        });
+      }
+    } else {
+      activeUseAccidentalsRef.current = val;
+      setActiveUseAccidentals(val);
+      segmentStartHitsRef.current = correctHitsRef.current;
+      segmentStartDurationMsRef.current = activeDurationMsRef.current;
+      segmentMeasuresCompletedRef.current = 0;
+      setSegmentMeasuresCompleted(0);
+      lastMeasurePaceRef.current = null;
+      setCurrentPace(null);
+      setPaceTrend(null);
+
+      const nextConfigKey = `${finishedKey}_${finishedMaxNotes}_${ledgerLines}_${val ? 'acc' : 'noacc'}`;
+      const nextScore = highScoresRef.current[nextConfigKey] || 0;
+      const rankVal = getRankForConfig(highScoresRef.current, nextConfigKey);
+      startRanksRef.current[nextConfigKey] = rankVal;
+      startScoresRef.current[nextConfigKey] = nextScore;
+      setStartRanks(prev => ({ ...prev, [nextConfigKey]: rankVal }));
+
+      if (wasPlaying) {
+        setKeyChangeAlert({
+          id: Date.now(),
+          keyName: selectedKeySignature === 'Random' ? `Losowa: ${activeKeySignatureRef.current}` : activeKeySignatureRef.current,
+          maxNotesText: selectedMaxNotes === 'Random' ? `Maks. nut: ${activeMaxNotesRef.current}` : undefined,
+          accidentalsText: `Znaki: ${val ? 'WŁ' : 'WYŁ'}`,
+          prevKeyName: summary?.prevKeyName,
+          prevKeyPace: summary?.prevKeyPace,
+          isNewRecord: summary?.isNewRecord,
+          wasFirstRecord: summary?.wasFirstRecord,
+          previousRecordPace: summary?.previousRecordPace,
+          rankText: summary?.rankText,
+          rankImproved: summary?.rankImproved,
+        });
+      }
+    }
+  }, [createFinishedSegmentSummary, selectedKeySignature, selectedMaxNotes, ledgerLines]);
 
   const handleApplyRecordConfig = useCallback((keyToApply: string) => {
     const parsed = parseConfigKey(keyToApply);
@@ -1235,25 +1347,28 @@ export default function App() {
 
     handleMaxNotesChange(parsed.rawNotes);
     setLedgerLines(parsed.rawLedger);
-    setUseAccidentals(parsed.rawAccidentals === 1);
+    handleAccidentalsChange(parsed.rawAccidentals === 1);
 
     setShowRecordsModal(false);
-  }, [handleKeySignatureChange, handleMaxNotesChange]);
+  }, [handleKeySignatureChange, handleMaxNotesChange, handleAccidentalsChange]);
 
   const generateMeasure = useCallback(() => {
     let currentKey = activeKeySignatureRef.current;
     let currentMaxNotes = activeMaxNotesRef.current;
+    let currentAccidentals = activeUseAccidentalsRef.current;
 
     const isRandomKey = selectedKeySignature === 'Random';
     const isRandomNotes = selectedMaxNotes === 'Random';
+    const isRandomAccidentals = selectedAccidentals === 'Random';
 
-    if (isRandomKey || isRandomNotes) {
+    if (isRandomKey || isRandomNotes || isRandomAccidentals) {
       const isNewRun = measuresPlayedRef.current === 0;
       const needsChange = !isNewRun && (measuresPlayedRef.current % 4 === 0);
       
       if (isNewRun || needsChange) {
         let nextKey = currentKey;
         let nextMaxNotes = currentMaxNotes;
+        let nextAccidentals = currentAccidentals;
 
         if (isRandomKey) {
           const keys = Object.keys(KEY_SIGNATURES) as Array<keyof typeof KEY_SIGNATURES>;
@@ -1266,16 +1381,22 @@ export default function App() {
           const availableNotes = possible.filter(n => n !== currentMaxNotes);
           nextMaxNotes = availableNotes[Math.floor(Math.random() * availableNotes.length)];
         }
+
+        if (isRandomAccidentals) {
+          nextAccidentals = isNewRun ? (Math.random() < 0.5) : !currentAccidentals;
+        }
         
         if (needsChange) {
           const finishedKey = currentKey;
           const finishedMaxNotes = currentMaxNotes;
-          const summary = createFinishedSegmentSummary(finishedKey, finishedMaxNotes);
+          const finishedAccidentals = currentAccidentals;
+          const summary = createFinishedSegmentSummary(finishedKey, finishedMaxNotes, finishedAccidentals);
 
           setKeyChangeAlert({
             id: Date.now(),
             keyName: nextKey,
             maxNotesText: isRandomNotes ? `Maks. nut: ${nextMaxNotes}` : undefined,
+            accidentalsText: isRandomAccidentals ? `Znaki: ${nextAccidentals ? 'WŁ' : 'WYŁ'}` : undefined,
             prevKeyName: summary.prevKeyName,
             prevKeyPace: summary.prevKeyPace,
             isNewRecord: summary.isNewRecord,
@@ -1294,7 +1415,11 @@ export default function App() {
         activeMaxNotesRef.current = nextMaxNotes;
         setActiveMaxNotes(nextMaxNotes);
 
-        const nextConfigKey = `${nextKey}_${nextMaxNotes}_${ledgerLines}_${useAccidentals ? 'acc' : 'noacc'}`;
+        currentAccidentals = nextAccidentals;
+        activeUseAccidentalsRef.current = nextAccidentals;
+        setActiveUseAccidentals(nextAccidentals);
+
+        const nextConfigKey = `${nextKey}_${nextMaxNotes}_${ledgerLines}_${nextAccidentals ? 'acc' : 'noacc'}`;
         const currentScores = highScoresRef.current;
         const nextScore = currentScores[nextConfigKey] || 0;
         const rankVal = getRankForConfig(currentScores, nextConfigKey);
@@ -1317,6 +1442,7 @@ export default function App() {
     const newNotes: Note[] = [];
     const beatXs = [300, 500, 700, 900];
     const measureAccidentals = new Map<string, string>(); // displayPitch -> 'sharp' | 'flat' | 'natural'
+    const useAccidentalsForNotes = activeUseAccidentalsRef.current;
 
     for (let beatIndex = 0; beatIndex < 4; beatIndex++) {
       const count = Math.floor(Math.random() * activeMaxNotesRef.current) + 1;
@@ -1370,7 +1496,7 @@ export default function App() {
         };
 
         // If a previously generated note in this measure got an accidental, increase the probability of repeating it
-        const recurringNotesWithAccidentals = useAccidentals ? newNotes.filter(
+        const recurringNotesWithAccidentals = useAccidentalsForNotes ? newNotes.filter(
           n => n.clef === (isTreble ? 'treble' : 'bass') && n.accidental !== null && n.accidental !== undefined
         ) : [];
         let chosenFromRecurring = false;
@@ -1431,7 +1557,7 @@ export default function App() {
         const hasMeasureAccidental = measureAccidentals.has(accidentalKey);
         const existingMeasureMod = measureAccidentals.get(accidentalKey);
 
-        if (useAccidentals) {
+        if (useAccidentalsForNotes) {
           if (hasMeasureAccidental && existingMeasureMod && Math.random() < 0.90) {
             // Keep the existing modification 90% of the time, so cancellations/changes are rare
             targetMod = existingMeasureMod;
@@ -1501,7 +1627,7 @@ export default function App() {
     setMeasureId(id => id + 1);
     setActivePianoNotes(new Map());
     lastPressBeatRef.current = 0;
-  }, [useAccidentals, selectedKeySignature, selectedMaxNotes, ledgerLines]);
+  }, [createFinishedSegmentSummary, selectedKeySignature, selectedMaxNotes, selectedAccidentals, ledgerLines]);
 
   // Regenerate only when settings are manually changed while playing
   const isSettingsInitialMount = useRef(true);
@@ -1513,7 +1639,7 @@ export default function App() {
     if (isPlayingRef.current) {
       generateMeasure();
     }
-  }, [useAccidentals, selectedKeySignature, selectedMaxNotes, ledgerLines, generateMeasure]);
+  }, [selectedAccidentals, selectedKeySignature, selectedMaxNotes, ledgerLines, generateMeasure]);
 
 const PITCH_CLASS_MAP: Record<string, number> = {
   'C': 0, 'B#': 0,
@@ -1877,17 +2003,53 @@ const getPitchClass = (p: string): number | null => {
             ))}
           </select>
 
-          {/* Accidentals Toggle */}
-          <button 
-            onClick={() => setUseAccidentals(!useAccidentals)}
-            className={`${isCompact ? 'text-[10px] px-2' : 'text-xs md:text-sm px-4'} py-1 rounded-full border transition-all ${
-              useAccidentals 
-                ? (isDarkMode ? 'bg-purple-950/40 border-purple-800/80 text-purple-300' : 'bg-purple-100 border-purple-300 text-purple-700') 
-                : (isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200' : 'bg-white border-neutral-200 text-neutral-500')
+          {/* Accidentals Selector */}
+          <div 
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full shadow-sm border transition-all ${
+              isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-200' : 'bg-white border-neutral-200 text-neutral-900'
             }`}
+            title={selectedAccidentals === 'Random' ? `Znaki przypadkowe: Losowo (aktualnie ${activeUseAccidentals ? 'WŁ' : 'WYŁ'}, co 4 takty)` : `Znaki przypadkowe: ${activeUseAccidentals ? 'WŁ' : 'WYŁ'}`}
           >
-            {isCompact ? 'Acc' : 'Accidentals'}: {useAccidentals ? 'ON' : 'OFF'}
-          </button>
+            {!isCompact && <span className={`text-[10px] font-bold uppercase ${isDarkMode ? 'text-zinc-500' : 'text-neutral-400'}`}>Znaki:</span>}
+            <select 
+              value={selectedAccidentals === 'Random' ? 'Random' : (selectedAccidentals ? 'ON' : 'OFF')}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === 'Random') {
+                  handleAccidentalsChange('Random');
+                } else if (val === 'ON') {
+                  handleAccidentalsChange(true);
+                } else {
+                  handleAccidentalsChange(false);
+                }
+              }}
+              className={`${isCompact ? 'text-[10px]' : 'text-xs'} font-bold outline-none bg-transparent cursor-pointer ${isDarkMode ? 'text-zinc-200 [&>option]:bg-zinc-900 [&>option]:text-zinc-100' : 'text-neutral-900'}`}
+            >
+              <option value="Random" className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>
+                Losowo
+              </option>
+              <option value="ON" className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>
+                WŁ (ON)
+              </option>
+              <option value="OFF" className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>
+                WYŁ (OFF)
+              </option>
+            </select>
+            {selectedAccidentals === 'Random' ? (
+              <span 
+                className={`text-[10px] font-black px-1.5 py-0.5 rounded leading-none shrink-0 ${
+                  activeUseAccidentals
+                    ? 'bg-purple-500 text-white'
+                    : (isDarkMode ? 'bg-zinc-800 text-zinc-400' : 'bg-neutral-200 text-neutral-600')
+                }`} 
+                title="Obecnie wylosowany stan znaków przypadkowych (zmienia się co 4 takty)"
+              >
+                {activeUseAccidentals ? 'WŁ' : 'WYŁ'}
+              </span>
+            ) : (
+              <span className={`w-2 h-2 rounded-full shrink-0 ${activeUseAccidentals ? 'bg-purple-500' : 'bg-neutral-300 dark:bg-zinc-600'}`} />
+            )}
+          </div>
 
           {/* Ledger Lines Selector */}
           <div className={`flex items-center gap-2 px-3 py-1 rounded-full shadow-sm border transition-all ${
@@ -2197,6 +2359,11 @@ const getPitchClass = (p: string): number | null => {
                           {keyChangeAlert.maxNotesText && (
                             <span className="text-[11px] bg-amber-500/20 text-amber-300 font-bold px-2 py-0.5 rounded-full border border-amber-400/30">
                               {keyChangeAlert.maxNotesText}
+                            </span>
+                          )}
+                          {keyChangeAlert.accidentalsText && (
+                            <span className="text-[11px] bg-purple-500/25 text-purple-300 font-bold px-2 py-0.5 rounded-full border border-purple-400/40">
+                              {keyChangeAlert.accidentalsText}
                             </span>
                           )}
                         </div>
