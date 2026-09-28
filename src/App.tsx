@@ -369,6 +369,7 @@ export default function App() {
     isNewRecord?: boolean;
     wasFirstRecord?: boolean;
     previousRecordPace?: number | null;
+    missingPace?: number | null;
     rankText?: string;
     rankImproved?: boolean;
     duration?: number;
@@ -380,6 +381,9 @@ export default function App() {
   const [startRanks, setStartRanks] = useState<Record<string, number | null>>({});
   const startRanksRef = useRef<Record<string, number | null>>({});
   const startScoresRef = useRef<Record<string, number>>({});
+  const segmentInitialRecordRef = useRef<number>(0);
+  const segmentInitialRankRef = useRef<number | null>(null);
+  const isListeningModeRef = useRef<boolean>(false);
   const [startTime, setStartTime] = useState<string | null>(null);
   const [startDateTime, setStartDateTime] = useState<Date | null>(null);
   const [elapsedMinutes, setElapsedMinutes] = useState<number>(0);
@@ -419,6 +423,10 @@ export default function App() {
     micError: null
   });
   const [showAudioInputModal, setShowAudioInputModal] = useState<boolean>(false);
+
+  useEffect(() => {
+    isListeningModeRef.current = audioInputStatus.isMicActive || audioInputStatus.isMidiConnected;
+  }, [audioInputStatus.isMicActive, audioInputStatus.isMidiConnected]);
 
   // Pitch Calibration & Remapping State
   const [transposeOffset, setTransposeOffset] = useState<number>(() => {
@@ -1014,23 +1022,26 @@ export default function App() {
     let rankText: string | undefined = undefined;
     let rankImproved = false;
 
-    const initialScore = startScoresRef.current[finishedConfigKey] !== undefined
-      ? startScoresRef.current[finishedConfigKey]
-      : (highScoresRef.current[finishedConfigKey] || 0);
-    const initialRank = startRanksRef.current[finishedConfigKey] !== undefined
-      ? startRanksRef.current[finishedConfigKey]
-      : (initialScore > 0 ? getRankForConfig(highScoresRef.current, finishedConfigKey) : null);
+    const initialScore = segmentInitialRecordRef.current > 0
+      ? segmentInitialRecordRef.current
+      : (startScoresRef.current[finishedConfigKey] !== undefined
+          ? startScoresRef.current[finishedConfigKey]
+          : (highScoresRef.current[finishedConfigKey] || 0));
+    const initialRank = segmentInitialRankRef.current !== null
+      ? segmentInitialRankRef.current
+      : (startRanksRef.current[finishedConfigKey] !== undefined
+          ? startRanksRef.current[finishedConfigKey]
+          : (initialScore > 0 ? getRankForConfig(highScoresRef.current, finishedConfigKey) : null));
     const previousRecordPace = initialScore > 0 ? initialScore : null;
 
     if (durationInKeySecs >= 1 && hitsInKey > 0) {
       keyPace = (hitsInKey * 60) / durationInKeySecs;
       const currentScores = highScoresRef.current;
-      const bestScoreInSegment = Math.max(keyPace, currentScores[finishedConfigKey] || 0);
 
-      if (bestScoreInSegment > initialScore) {
+      if (initialScore <= 0 || keyPace > initialScore) {
         isNewRecord = true;
         wasFirstRecord = initialScore <= 0;
-        const nextHighScores = { ...currentScores, [finishedConfigKey]: bestScoreInSegment };
+        const nextHighScores = { ...currentScores, [finishedConfigKey]: keyPace };
         highScoresRef.current = nextHighScores;
         setHighScores(nextHighScores);
         localStorage.setItem('piano_pace_high_scores', JSON.stringify(nextHighScores));
@@ -1053,7 +1064,7 @@ export default function App() {
           rankText = `#${newRank}`;
         }
 
-        startScoresRef.current[finishedConfigKey] = bestScoreInSegment;
+        startScoresRef.current[finishedConfigKey] = keyPace;
         startRanksRef.current[finishedConfigKey] = newRank;
       } else {
         isNewRecord = false;
@@ -1065,16 +1076,18 @@ export default function App() {
       }
     }
 
-    const currentScores = highScoresRef.current;
-    const finalReportedPace = Math.max(keyPace || 0, currentScores[finishedConfigKey] || 0) || keyPace;
+    const missingPace = (!isNewRecord && keyPace !== null && previousRecordPace !== null && previousRecordPace > keyPace)
+      ? Number((previousRecordPace - keyPace).toFixed(2))
+      : null;
 
     const accLabel = finishedUseAccidentals ? 'ze znakami' : 'bez znaków';
     return {
       prevKeyName: `${finishedKey} (N${finishedMaxNotes}, ${accLabel})`,
-      prevKeyPace: finalReportedPace,
+      prevKeyPace: keyPace,
       isNewRecord,
       wasFirstRecord,
       previousRecordPace,
+      missingPace,
       rankText,
       rankImproved
     };
@@ -1113,6 +1126,8 @@ export default function App() {
       const nextConfigKey = `${randomKey}_${finishedMaxNotes}_${ledgerLines}_${accidentalsToUse ? 'acc' : 'noacc'}`;
       const nextScore = highScoresRef.current[nextConfigKey] || 0;
       const rankVal = getRankForConfig(highScoresRef.current, nextConfigKey);
+      segmentInitialRecordRef.current = nextScore;
+      segmentInitialRankRef.current = rankVal;
       startRanksRef.current[nextConfigKey] = rankVal;
       startScoresRef.current[nextConfigKey] = nextScore;
       setStartRanks(prev => ({ ...prev, [nextConfigKey]: rankVal }));
@@ -1126,6 +1141,7 @@ export default function App() {
           isNewRecord: summary?.isNewRecord,
           wasFirstRecord: summary?.wasFirstRecord,
           previousRecordPace: summary?.previousRecordPace,
+          missingPace: summary?.missingPace,
           rankText: summary?.rankText,
           rankImproved: summary?.rankImproved,
         });
@@ -1144,6 +1160,8 @@ export default function App() {
       const nextConfigKey = `${val}_${finishedMaxNotes}_${ledgerLines}_${accidentalsToUse ? 'acc' : 'noacc'}`;
       const nextScore = highScoresRef.current[nextConfigKey] || 0;
       const rankVal = getRankForConfig(highScoresRef.current, nextConfigKey);
+      segmentInitialRecordRef.current = nextScore;
+      segmentInitialRankRef.current = rankVal;
       startRanksRef.current[nextConfigKey] = rankVal;
       startScoresRef.current[nextConfigKey] = nextScore;
       setStartRanks(prev => ({ ...prev, [nextConfigKey]: rankVal }));
@@ -1157,6 +1175,7 @@ export default function App() {
           isNewRecord: summary?.isNewRecord,
           wasFirstRecord: summary?.wasFirstRecord,
           previousRecordPace: summary?.previousRecordPace,
+          missingPace: summary?.missingPace,
           rankText: summary?.rankText,
           rankImproved: summary?.rankImproved,
         });
@@ -1197,6 +1216,8 @@ export default function App() {
       const nextConfigKey = `${finishedKey}_${randomNotes}_${ledgerLines}_${accidentalsToUse ? 'acc' : 'noacc'}`;
       const nextScore = highScoresRef.current[nextConfigKey] || 0;
       const rankVal = getRankForConfig(highScoresRef.current, nextConfigKey);
+      segmentInitialRecordRef.current = nextScore;
+      segmentInitialRankRef.current = rankVal;
       startRanksRef.current[nextConfigKey] = rankVal;
       startScoresRef.current[nextConfigKey] = nextScore;
       setStartRanks(prev => ({ ...prev, [nextConfigKey]: rankVal }));
@@ -1211,6 +1232,7 @@ export default function App() {
           isNewRecord: summary?.isNewRecord,
           wasFirstRecord: summary?.wasFirstRecord,
           previousRecordPace: summary?.previousRecordPace,
+          missingPace: summary?.missingPace,
           rankText: summary?.rankText,
           rankImproved: summary?.rankImproved,
         });
@@ -1229,6 +1251,8 @@ export default function App() {
       const nextConfigKey = `${finishedKey}_${val}_${ledgerLines}_${accidentalsToUse ? 'acc' : 'noacc'}`;
       const nextScore = highScoresRef.current[nextConfigKey] || 0;
       const rankVal = getRankForConfig(highScoresRef.current, nextConfigKey);
+      segmentInitialRecordRef.current = nextScore;
+      segmentInitialRankRef.current = rankVal;
       startRanksRef.current[nextConfigKey] = rankVal;
       startScoresRef.current[nextConfigKey] = nextScore;
       setStartRanks(prev => ({ ...prev, [nextConfigKey]: rankVal }));
@@ -1243,6 +1267,7 @@ export default function App() {
           isNewRecord: summary?.isNewRecord,
           wasFirstRecord: summary?.wasFirstRecord,
           previousRecordPace: summary?.previousRecordPace,
+          missingPace: summary?.missingPace,
           rankText: summary?.rankText,
           rankImproved: summary?.rankImproved,
         });
@@ -1280,6 +1305,8 @@ export default function App() {
       const nextConfigKey = `${finishedKey}_${finishedMaxNotes}_${ledgerLines}_${randomAcc ? 'acc' : 'noacc'}`;
       const nextScore = highScoresRef.current[nextConfigKey] || 0;
       const rankVal = getRankForConfig(highScoresRef.current, nextConfigKey);
+      segmentInitialRecordRef.current = nextScore;
+      segmentInitialRankRef.current = rankVal;
       startRanksRef.current[nextConfigKey] = rankVal;
       startScoresRef.current[nextConfigKey] = nextScore;
       setStartRanks(prev => ({ ...prev, [nextConfigKey]: rankVal }));
@@ -1295,6 +1322,7 @@ export default function App() {
           isNewRecord: summary?.isNewRecord,
           wasFirstRecord: summary?.wasFirstRecord,
           previousRecordPace: summary?.previousRecordPace,
+          missingPace: summary?.missingPace,
           rankText: summary?.rankText,
           rankImproved: summary?.rankImproved,
         });
@@ -1313,6 +1341,8 @@ export default function App() {
       const nextConfigKey = `${finishedKey}_${finishedMaxNotes}_${ledgerLines}_${val ? 'acc' : 'noacc'}`;
       const nextScore = highScoresRef.current[nextConfigKey] || 0;
       const rankVal = getRankForConfig(highScoresRef.current, nextConfigKey);
+      segmentInitialRecordRef.current = nextScore;
+      segmentInitialRankRef.current = rankVal;
       startRanksRef.current[nextConfigKey] = rankVal;
       startScoresRef.current[nextConfigKey] = nextScore;
       setStartRanks(prev => ({ ...prev, [nextConfigKey]: rankVal }));
@@ -1328,6 +1358,7 @@ export default function App() {
           isNewRecord: summary?.isNewRecord,
           wasFirstRecord: summary?.wasFirstRecord,
           previousRecordPace: summary?.previousRecordPace,
+          missingPace: summary?.missingPace,
           rankText: summary?.rankText,
           rankImproved: summary?.rankImproved,
         });
@@ -1402,6 +1433,7 @@ export default function App() {
             isNewRecord: summary.isNewRecord,
             wasFirstRecord: summary.wasFirstRecord,
             previousRecordPace: summary.previousRecordPace,
+            missingPace: summary.missingPace,
             rankText: summary.rankText,
             rankImproved: summary.rankImproved,
           });
@@ -1423,6 +1455,8 @@ export default function App() {
         const currentScores = highScoresRef.current;
         const nextScore = currentScores[nextConfigKey] || 0;
         const rankVal = getRankForConfig(currentScores, nextConfigKey);
+        segmentInitialRecordRef.current = nextScore;
+        segmentInitialRankRef.current = rankVal;
         startRanksRef.current[nextConfigKey] = rankVal;
         startScoresRef.current[nextConfigKey] = nextScore;
         setStartRanks(prev => ({ ...prev, [nextConfigKey]: rankVal }));
@@ -1662,7 +1696,7 @@ const getPitchClass = (p: string): number | null => {
   return PITCH_CLASS_MAP[noteName] ?? null;
 };
 
-  const handlePianoPress = useCallback((pitch: string) => {
+  const handlePianoPress = useCallback((pitch: string, isFromAudioInput = false) => {
     if (soundEnabled) {
       audioService.playNote(pitch);
     }
@@ -1704,6 +1738,7 @@ const getPitchClass = (p: string): number | null => {
     }
 
     let isLastOfBeat = false;
+    const isListeningModeActive = isFromAudioInput || isListeningModeRef.current || audioInputStatus.isMicActive || audioInputStatus.isMidiConnected;
 
     if (matchingNote) {
       status = 'hit';
@@ -1755,12 +1790,27 @@ const getPitchClass = (p: string): number | null => {
 
       if (wrongOctaveNote) {
         status = 'wrong-octave';
-        setScore(s => Math.max(0, s - 3));
-        setFeedback({ type: 'wrong-octave', id: Date.now(), message: 'Inna oktawa' });
+        // In listening mode (playing on physical instrument with mic/MIDI), do not deduct points
+        // because mic often misdetects pitch or catches ambient noise
+        if (!isListeningModeActive) {
+          setScore(s => Math.max(0, s - 3));
+        }
+        setFeedback({ 
+          type: 'wrong-octave', 
+          id: Date.now(), 
+          message: isListeningModeActive ? 'Inna oktawa (bez kary)' : 'Inna oktawa' 
+        });
       } else {
         status = 'miss';
-        setScore(s => Math.max(0, s - 5));
-        setFeedback({ type: 'miss', id: Date.now(), message: 'Nietrafione' });
+        // In listening mode, do not deduct points for wrong sound or ambient room noise
+        if (!isListeningModeActive) {
+          setScore(s => Math.max(0, s - 5));
+        }
+        setFeedback({ 
+          type: 'miss', 
+          id: Date.now(), 
+          message: isListeningModeActive ? 'Nietrafione (bez kary)' : 'Nietrafione' 
+        });
       }
 
       // Auto-clear wrong key highlight after 450ms so keyboard stays clean while waiting
@@ -1791,7 +1841,7 @@ const getPitchClass = (p: string): number | null => {
       next.set(pitch, status);
       return next;
     });
-  }, [isPlaying, generateMeasure, soundEnabled, showHistory, calculateAndSavePace]);
+  }, [isPlaying, generateMeasure, soundEnabled, showHistory, calculateAndSavePace, audioInputStatus.isMicActive, audioInputStatus.isMidiConnected]);
 
   const skipCurrentBeat = useCallback(() => {
     const beat = currentBeatRef.current;
@@ -1830,7 +1880,7 @@ const getPitchClass = (p: string): number | null => {
     audioInputService.setCallbacks(
       (pitch) => {
         const calibratedPitch = remapPitchRef.current(pitch);
-        handlePianoPressRef.current(calibratedPitch);
+        handlePianoPressRef.current(calibratedPitch, true);
       },
       (status) => {
         setAudioInputStatus(status);
@@ -1870,6 +1920,8 @@ const getPitchClass = (p: string): number | null => {
     startRanksRef.current = {};
     startScoresRef.current = {};
     setStartRanks({});
+    segmentInitialRecordRef.current = 0;
+    segmentInitialRankRef.current = null;
   };
 
   const totalSecs = history.reduce((acc, item) => acc + ((item.minutes ?? 0) * 60 + (item.seconds ?? 0)), 0);
@@ -2159,9 +2211,12 @@ const getPitchClass = (p: string): number | null => {
             </button>
           )}
 
-          <div className={`flex items-center gap-2 px-3 py-1 rounded-full shadow-sm border transition-all ${
-            isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-200' : 'bg-white border-neutral-200 text-neutral-900'
-          }`}>
+          <div 
+            className={`flex items-center gap-2 px-3 py-1 rounded-full shadow-sm border transition-all ${
+              isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-200' : 'bg-white border-neutral-200 text-neutral-900'
+            }`}
+            title={audioInputStatus.isMicActive || audioInputStatus.isMidiConnected ? "Tryb słuchania: brak kar punktowych za błędne dźwięki i hałas otoczenia" : "Punkty"}
+          >
             <Trophy size={isCompact ? 12 : 16} className="text-yellow-500" />
             <span className={`font-mono font-bold ${isCompact ? 'text-xs' : 'text-sm'}`}>{score}</span>
           </div>
@@ -2206,6 +2261,16 @@ const getPitchClass = (p: string): number | null => {
                   setCurrentPace(null);
                   setPaceTrend(null);
                   measuresPlayedRef.current = 0;
+                  const keyToUse = selectedKeySignature === 'Random' ? activeKeySignatureRef.current : selectedKeySignature;
+                  const maxNotesToUse = selectedMaxNotes === 'Random' ? activeMaxNotesRef.current : selectedMaxNotes;
+                  const accidentalsToUse = selectedAccidentals === 'Random' ? activeUseAccidentalsRef.current : selectedAccidentals;
+                  const startConfigKey = `${keyToUse}_${maxNotesToUse}_${ledgerLines}_${accidentalsToUse ? 'acc' : 'noacc'}`;
+                  const currentRec = highScoresRef.current[startConfigKey] || 0;
+                  const currentRk = currentRec > 0 ? getRankForConfig(highScoresRef.current, startConfigKey) : null;
+                  segmentInitialRecordRef.current = currentRec;
+                  segmentInitialRankRef.current = currentRk;
+                  startScoresRef.current[startConfigKey] = currentRec;
+                  startRanksRef.current[startConfigKey] = currentRk;
                   if (startRanksRef.current[configKey] === undefined) {
                     startRanksRef.current[configKey] = currentConfigRank;
                     setStartRanks(prev => ({
@@ -2393,7 +2458,7 @@ const getPitchClass = (p: string): number | null => {
                           Tonacja: <span className="text-white font-bold">{keyChangeAlert.prevKeyName}</span>
                         </span>
                         <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] uppercase font-bold text-zinc-400">Prędkość:</span>
+                          <span className="text-[10px] uppercase font-bold text-zinc-400">Twoja prędkość:</span>
                           <strong className="font-mono font-black text-amber-400 text-xs sm:text-sm">
                             {keyChangeAlert.prevKeyPace !== undefined && keyChangeAlert.prevKeyPace !== null
                               ? `${keyChangeAlert.prevKeyPace.toFixed(2)} NPM`
@@ -2402,23 +2467,40 @@ const getPitchClass = (p: string): number | null => {
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between gap-2 flex-wrap pt-1.5 border-t border-zinc-800/80">
+                      <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-zinc-800/80">
                         {/* Status czy rekord został pobity */}
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-2">
                           {keyChangeAlert.isNewRecord ? (
-                            <span className="px-2 py-0.5 rounded-md bg-emerald-400 text-black text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-xs">
-                              🏆 {keyChangeAlert.wasFirstRecord ? 'Nowy rekord!' : 'Rekord pobity!'}
-                            </span>
-                          ) : keyChangeAlert.prevKeyPace !== null && keyChangeAlert.prevKeyPace !== undefined ? (
-                            <span className="px-1.5 py-0.5 rounded-md bg-zinc-800 text-zinc-300 text-[10px] font-medium border border-zinc-700">
-                              Nie pobito {keyChangeAlert.previousRecordPace ? `(rekord: ${keyChangeAlert.previousRecordPace.toFixed(2)} NPM)` : ''}
-                            </span>
-                          ) : null}
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="px-2 py-0.5 rounded-md bg-emerald-400 text-black text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-xs">
+                                🏆 {keyChangeAlert.wasFirstRecord ? 'Nowy rekord!' : 'Rekord pobity!'}
+                              </span>
+                              {keyChangeAlert.previousRecordPace && !keyChangeAlert.wasFirstRecord && keyChangeAlert.prevKeyPace && (
+                                <span className="text-[10px] text-emerald-400 font-mono font-bold">
+                                  (+{(keyChangeAlert.prevKeyPace - keyChangeAlert.previousRecordPace).toFixed(2)} NPM)
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2 whitespace-nowrap shrink-0">
+                              <span className="px-1.5 py-0.5 rounded-md bg-zinc-800 text-zinc-300 text-[10px] font-medium border border-zinc-700">
+                                Nie pobito rekordu
+                              </span>
+                              {keyChangeAlert.previousRecordPace ? (
+                                <div className="flex items-center gap-1 text-[11px]">
+                                  <span className="text-zinc-400 text-[10px] uppercase font-bold">Rekord:</span>
+                                  <strong className="text-amber-300 font-mono font-bold">
+                                    {keyChangeAlert.previousRecordPace.toFixed(2)} NPM
+                                  </strong>
+                                </div>
+                              ) : null}
+                            </div>
+                          )}
                         </div>
 
                         {/* Z którego miejsca na które rekord zawędrował */}
                         {keyChangeAlert.rankText && (
-                          <div className="flex items-center gap-1 font-mono font-black text-[10px] bg-zinc-800/90 text-amber-300 px-2 py-0.5 rounded-md border border-zinc-700 ml-auto">
+                          <div className="flex items-center gap-1 font-mono font-black text-[10px] bg-zinc-800/90 text-amber-300 px-2 py-0.5 rounded-md border border-zinc-700 shrink-0 ml-auto">
                             <span className="text-[9px] font-sans font-medium text-zinc-400 mr-0.5 uppercase tracking-wider">
                               Miejsce:
                             </span>
