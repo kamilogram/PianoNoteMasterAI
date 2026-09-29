@@ -277,12 +277,10 @@ export const Staff: React.FC<StaffProps> = React.memo(({
 
     // 1. Draw stems and ledger lines first
     notes.forEach(note => {
-      const notesInBeatCount = notes.filter(n => n.beatIndex === note.beatIndex).length;
       const isHit = !!note.isHit;
       
-      // Green color ONLY in sound listening mode when there is more than maximum 1 note per beat
-      const hasMoreThanOneNote = (maxNotes !== undefined ? maxNotes > 1 : false) || notesInBeatCount > 1;
-      const isGreen = Boolean(isListeningMode && hasMoreThanOneNote && isHit);
+      // Green color in sound listening mode for correctly hit notes
+      const isGreen = Boolean(isListeningMode && isHit);
       const hitGreenColor = isDarkMode ? '#4ade80' : '#16a34a';
 
       ctx.globalAlpha = 1.0;
@@ -325,12 +323,10 @@ export const Staff: React.FC<StaffProps> = React.memo(({
 
     // 2. Draw noteheads and accidentals on top so green hit notes stand out clearly
     notes.forEach(note => {
-      const notesInBeatCount = notes.filter(n => n.beatIndex === note.beatIndex).length;
       const isHit = !!note.isHit;
 
-      // Green color ONLY in sound listening mode when there is more than maximum 1 note per beat
-      const hasMoreThanOneNote = (maxNotes !== undefined ? maxNotes > 1 : false) || notesInBeatCount > 1;
-      const isGreen = Boolean(isListeningMode && hasMoreThanOneNote && isHit);
+      // Green color in sound listening mode for correctly hit notes
+      const isGreen = Boolean(isListeningMode && isHit);
 
       const hitGreenColor = isDarkMode ? '#4ade80' : '#16a34a';
       const currentNoteColor = isGreen ? hitGreenColor : primaryNoteColor;

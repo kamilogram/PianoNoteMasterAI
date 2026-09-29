@@ -9,7 +9,7 @@ import { Piano } from './components/Piano';
 import { Staff } from './components/Staff';
 import { audioService } from './services/audioService';
 import { audioInputService, AudioInputStatus } from './services/audioInputService';
-import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock, Sun, Moon, Volume2, VolumeX, TrendingUp, History, Calendar, Trash2, X, SlidersHorizontal, Plus, ChevronDown, ChevronUp, Mic, MicOff, Radio, SkipForward, Lightbulb, HelpCircle, Info, CheckCircle2, Download, Smartphone, Laptop, Wifi, WifiOff, ArrowUp, ArrowDown } from 'lucide-react';
+import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock, Sun, Moon, Volume2, VolumeX, TrendingUp, History, Calendar, Trash2, X, SlidersHorizontal, Plus, ChevronDown, ChevronUp, Mic, MicOff, Radio, SkipForward, Lightbulb, HelpCircle, Info, CheckCircle2, Download, Smartphone, Laptop, Wifi, WifiOff, ArrowUp, ArrowDown, Target, CheckSquare, Square } from 'lucide-react';
 
 interface Note {
   id: number;
@@ -292,6 +292,10 @@ export default function App() {
     const saved = localStorage.getItem('piano_ledger_lines');
     return saved !== null ? parseInt(saved, 10) : 2;
   });
+  const activeLedgerLinesRef = useRef<number>(ledgerLines);
+  useEffect(() => {
+    activeLedgerLinesRef.current = ledgerLines;
+  }, [ledgerLines]);
   const [selectedAccidentals, setSelectedAccidentals] = useState<boolean | 'Random'>(() => {
     const saved = localStorage.getItem('piano_selected_accidentals');
     if (saved === 'Random') return 'Random';
@@ -359,6 +363,15 @@ export default function App() {
   const [measureId, setMeasureId] = useState(0);
   const [activePianoNotes, setActivePianoNotes] = useState<Map<string, 'hit' | 'miss' | 'wrong-octave' | 'default'>>(new Map());
   const [feedback, setFeedback] = useState<{ type: 'hit' | 'miss' | 'wrong-octave', id: number, message?: string } | null>(null);
+
+  useEffect(() => {
+    if (feedback) {
+      const timer = setTimeout(() => {
+        setFeedback(null);
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [feedback]);
   const [keyChangeAlert, setKeyChangeAlert] = useState<{
     id: number;
     keyName: string;
@@ -412,6 +425,29 @@ export default function App() {
   useEffect(() => {
     highScoresRef.current = highScores;
   }, [highScores]);
+
+  const [selectedRecordKeysForTraining, setSelectedRecordKeysForTraining] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('piano_pace_training_selected_records');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const selectedRecordKeysForTrainingRef = useRef<string[]>(selectedRecordKeysForTraining);
+  useEffect(() => {
+    selectedRecordKeysForTrainingRef.current = selectedRecordKeysForTraining;
+    localStorage.setItem('piano_pace_training_selected_records', JSON.stringify(selectedRecordKeysForTraining));
+  }, [selectedRecordKeysForTraining]);
+
+  const [isPracticeFromRecordsActive, setIsPracticeFromRecordsActive] = useState<boolean>(() => {
+    return localStorage.getItem('piano_practice_selected_records_active') === 'true';
+  });
+  const isPracticeFromRecordsActiveRef = useRef<boolean>(isPracticeFromRecordsActive);
+  useEffect(() => {
+    isPracticeFromRecordsActiveRef.current = isPracticeFromRecordsActive;
+    localStorage.setItem('piano_practice_selected_records_active', String(isPracticeFromRecordsActive));
+  }, [isPracticeFromRecordsActive]);
 
   const [audioInputStatus, setAudioInputStatus] = useState<AudioInputStatus>({
     isMidiConnected: false,
@@ -681,6 +717,7 @@ export default function App() {
       localStorage.setItem('piano_pace_high_scores', JSON.stringify(next));
       return next;
     });
+    setSelectedRecordKeysForTraining(prev => prev.filter(k => k !== keyToDelete));
   };
 
   const handleClearAllRecords = () => {
@@ -690,8 +727,32 @@ export default function App() {
     startScoresRef.current = {};
     setStartRanks({});
     localStorage.removeItem('piano_pace_high_scores');
+    setSelectedRecordKeysForTraining([]);
+    setIsPracticeFromRecordsActive(false);
     setShowClearRecordsConfirm(false);
   };
+
+  const toggleRecordKeyForTraining = useCallback((key: string) => {
+    setSelectedRecordKeysForTraining(prev => {
+      if (prev.includes(key)) {
+        return prev.filter(k => k !== key);
+      } else {
+        return [...prev, key];
+      }
+    });
+  }, []);
+
+  const selectAllRecordsForTraining = useCallback(() => {
+    const allKeys = (Object.entries(highScoresRef.current) as [string, number][])
+      .filter(([_, scoreVal]) => scoreVal > 0)
+      .map(([k]) => k);
+    setSelectedRecordKeysForTraining(allKeys);
+  }, []);
+
+  const deselectAllRecordsForTraining = useCallback(() => {
+    setSelectedRecordKeysForTraining([]);
+    setIsPracticeFromRecordsActive(false);
+  }, []);
 
   const keyToUse = selectedKeySignature === 'Random' ? activeKeySignature : selectedKeySignature;
   const maxNotesToUse = selectedMaxNotes === 'Random' ? activeMaxNotes : selectedMaxNotes;
@@ -863,10 +924,11 @@ export default function App() {
 
     // After 4th measure, and on every subsequent measure (>= 4), check and save/update record
     if (measuresCount >= 4) {
-      const keyToUse = selectedKeySignature === 'Random' ? activeKeySignatureRef.current : selectedKeySignature;
-      const maxNotesToUse = selectedMaxNotes === 'Random' ? activeMaxNotesRef.current : selectedMaxNotes;
-      const accidentalsToUse = selectedAccidentals === 'Random' ? activeUseAccidentalsRef.current : selectedAccidentals;
-      const activeConfigKey = `${keyToUse}_${maxNotesToUse}_${ledgerLines}_${accidentalsToUse ? 'acc' : 'noacc'}`;
+      const currentKey = activeKeySignatureRef.current;
+      const currentMaxNotes = activeMaxNotesRef.current;
+      const currentAccidentals = activeUseAccidentalsRef.current;
+      const currentLedger = activeLedgerLinesRef.current;
+      const activeConfigKey = `${currentKey}_${currentMaxNotes}_${currentLedger}_${currentAccidentals ? 'acc' : 'noacc'}`;
 
       const currentRecord = highScoresRef.current[activeConfigKey] || 0;
       if (pace > currentRecord) {
@@ -1010,8 +1072,14 @@ export default function App() {
     return () => mql.removeEventListener('change', checkCompact);
   }, []);
 
-  const createFinishedSegmentSummary = useCallback((finishedKey: string, finishedMaxNotes: number, finishedUseAccidentals: boolean) => {
-    const finishedConfigKey = `${finishedKey}_${finishedMaxNotes}_${ledgerLines}_${finishedUseAccidentals ? 'acc' : 'noacc'}`;
+  const createFinishedSegmentSummary = useCallback((
+    finishedKey: string, 
+    finishedMaxNotes: number, 
+    finishedUseAccidentals: boolean,
+    finishedLedgerLinesParam?: number
+  ) => {
+    const ledger = finishedLedgerLinesParam !== undefined ? finishedLedgerLinesParam : activeLedgerLinesRef.current;
+    const finishedConfigKey = `${finishedKey}_${finishedMaxNotes}_${ledger}_${finishedUseAccidentals ? 'acc' : 'noacc'}`;
     const hitsInKey = correctHitsRef.current - segmentStartHitsRef.current;
     const durationInKeyMs = activeDurationMsRef.current - segmentStartDurationMsRef.current;
     const durationInKeySecs = durationInKeyMs / 1000;
@@ -1370,6 +1438,9 @@ export default function App() {
     const parsed = parseConfigKey(keyToApply);
     if (!parsed) return;
 
+    setIsPracticeFromRecordsActive(false);
+    isPracticeFromRecordsActiveRef.current = false;
+
     if (parsed.keySignature === 'Random' || parsed.keySignature === 'Losowo') {
       handleKeySignatureChange('Random');
     } else if (KEY_SIGNATURES[parsed.keySignature as keyof typeof KEY_SIGNATURES]) {
@@ -1387,12 +1458,95 @@ export default function App() {
     let currentKey = activeKeySignatureRef.current;
     let currentMaxNotes = activeMaxNotesRef.current;
     let currentAccidentals = activeUseAccidentalsRef.current;
+    let currentLedger = activeLedgerLinesRef.current;
 
+    const isCustomPool = isPracticeFromRecordsActiveRef.current && selectedRecordKeysForTrainingRef.current.length > 0;
     const isRandomKey = selectedKeySignature === 'Random';
     const isRandomNotes = selectedMaxNotes === 'Random';
     const isRandomAccidentals = selectedAccidentals === 'Random';
 
-    if (isRandomKey || isRandomNotes || isRandomAccidentals) {
+    if (isCustomPool) {
+      const isNewRun = measuresPlayedRef.current === 0;
+      const needsChange = !isNewRun && (measuresPlayedRef.current % 4 === 0);
+
+      if (isNewRun || needsChange) {
+        const pool = selectedRecordKeysForTrainingRef.current.filter(k => (highScoresRef.current[k] || 0) > 0);
+        const effectivePool = pool.length > 0 ? pool : selectedRecordKeysForTrainingRef.current;
+        const currentConfigKey = `${currentKey}_${currentMaxNotes}_${currentLedger}_${currentAccidentals ? 'acc' : 'noacc'}`;
+
+        let nextConfigKeyToApply: string;
+        if (effectivePool.length > 1) {
+          const differentPool = effectivePool.filter(k => k !== currentConfigKey);
+          const candidates = differentPool.length > 0 ? differentPool : effectivePool;
+          nextConfigKeyToApply = candidates[Math.floor(Math.random() * candidates.length)];
+        } else {
+          nextConfigKeyToApply = effectivePool[0];
+        }
+
+        const parsed = parseConfigKey(nextConfigKeyToApply);
+        const nextKey = (parsed.keySignature as keyof typeof KEY_SIGNATURES) || currentKey;
+        const nextMaxNotes = parsed.rawNotes || currentMaxNotes;
+        const nextAccidentals = parsed.rawAccidentals === 1;
+        const nextLedger = parsed.rawLedger !== undefined ? parsed.rawLedger : currentLedger;
+
+        if (needsChange) {
+          const finishedKey = currentKey;
+          const finishedMaxNotes = currentMaxNotes;
+          const finishedAccidentals = currentAccidentals;
+          const finishedLedger = currentLedger;
+          const summary = createFinishedSegmentSummary(finishedKey, finishedMaxNotes, finishedAccidentals, finishedLedger);
+
+          setKeyChangeAlert({
+            id: Date.now(),
+            keyName: nextKey,
+            maxNotesText: `Maks. nut: ${nextMaxNotes}`,
+            accidentalsText: `Znaki: ${nextAccidentals ? 'WŁ' : 'WYŁ'}`,
+            prevKeyName: summary.prevKeyName,
+            prevKeyPace: summary.prevKeyPace,
+            isNewRecord: summary.isNewRecord,
+            wasFirstRecord: summary.wasFirstRecord,
+            previousRecordPace: summary.previousRecordPace,
+            missingPace: summary.missingPace,
+            rankText: summary.rankText,
+            rankImproved: summary.rankImproved,
+          });
+        }
+
+        currentKey = nextKey;
+        activeKeySignatureRef.current = nextKey;
+        setActiveKeySignature(nextKey);
+
+        currentMaxNotes = nextMaxNotes;
+        activeMaxNotesRef.current = nextMaxNotes;
+        setActiveMaxNotes(nextMaxNotes);
+
+        currentAccidentals = nextAccidentals;
+        activeUseAccidentalsRef.current = nextAccidentals;
+        setActiveUseAccidentals(nextAccidentals);
+
+        currentLedger = nextLedger;
+        activeLedgerLinesRef.current = nextLedger;
+        setLedgerLines(nextLedger);
+
+        const nextConfigKey = `${nextKey}_${nextMaxNotes}_${nextLedger}_${nextAccidentals ? 'acc' : 'noacc'}`;
+        const currentScores = highScoresRef.current;
+        const nextScore = currentScores[nextConfigKey] || 0;
+        const rankVal = getRankForConfig(currentScores, nextConfigKey);
+        segmentInitialRecordRef.current = nextScore;
+        segmentInitialRankRef.current = rankVal;
+        startRanksRef.current[nextConfigKey] = rankVal;
+        startScoresRef.current[nextConfigKey] = nextScore;
+        setStartRanks(prev => ({ ...prev, [nextConfigKey]: rankVal }));
+
+        segmentStartHitsRef.current = correctHitsRef.current;
+        segmentStartDurationMsRef.current = activeDurationMsRef.current;
+        segmentMeasuresCompletedRef.current = 0;
+        setSegmentMeasuresCompleted(0);
+        lastMeasurePaceRef.current = null;
+        setCurrentPace(null);
+        setPaceTrend(null);
+      }
+    } else if (isRandomKey || isRandomNotes || isRandomAccidentals) {
       const isNewRun = measuresPlayedRef.current === 0;
       const needsChange = !isNewRun && (measuresPlayedRef.current % 4 === 0);
       
@@ -1421,7 +1575,8 @@ export default function App() {
           const finishedKey = currentKey;
           const finishedMaxNotes = currentMaxNotes;
           const finishedAccidentals = currentAccidentals;
-          const summary = createFinishedSegmentSummary(finishedKey, finishedMaxNotes, finishedAccidentals);
+          const finishedLedger = activeLedgerLinesRef.current;
+          const summary = createFinishedSegmentSummary(finishedKey, finishedMaxNotes, finishedAccidentals, finishedLedger);
 
           setKeyChangeAlert({
             id: Date.now(),
@@ -1663,6 +1818,64 @@ export default function App() {
     lastPressBeatRef.current = 0;
   }, [createFinishedSegmentSummary, selectedKeySignature, selectedMaxNotes, selectedAccidentals, ledgerLines]);
 
+  const startTrainingSelectedRecords = useCallback((keysToUse?: string[]) => {
+    const rawPool = keysToUse || selectedRecordKeysForTrainingRef.current;
+    const pool = rawPool.filter(k => (highScoresRef.current[k] || 0) > 0);
+    if (pool.length === 0) return;
+
+    setIsPracticeFromRecordsActive(true);
+    isPracticeFromRecordsActiveRef.current = true;
+    setShowRecordsModal(false);
+
+    // Pick first random key from pool
+    const chosenKey = pool[Math.floor(Math.random() * pool.length)];
+    const parsed = parseConfigKey(chosenKey);
+    if (parsed) {
+      if (KEY_SIGNATURES[parsed.keySignature as keyof typeof KEY_SIGNATURES]) {
+        activeKeySignatureRef.current = parsed.keySignature as keyof typeof KEY_SIGNATURES;
+        setActiveKeySignature(parsed.keySignature as keyof typeof KEY_SIGNATURES);
+      }
+      activeMaxNotesRef.current = parsed.rawNotes;
+      setActiveMaxNotes(parsed.rawNotes);
+      activeUseAccidentalsRef.current = parsed.rawAccidentals === 1;
+      setActiveUseAccidentals(parsed.rawAccidentals === 1);
+      activeLedgerLinesRef.current = parsed.rawLedger;
+      setLedgerLines(parsed.rawLedger);
+
+      const startConfigKey = `${parsed.keySignature}_${parsed.rawNotes}_${parsed.rawLedger}_${parsed.rawAccidentals === 1 ? 'acc' : 'noacc'}`;
+      const currentRec = highScoresRef.current[startConfigKey] || 0;
+      const currentRk = currentRec > 0 ? getRankForConfig(highScoresRef.current, startConfigKey) : null;
+      segmentInitialRecordRef.current = currentRec;
+      segmentInitialRankRef.current = currentRk;
+      startScoresRef.current[startConfigKey] = currentRec;
+      startRanksRef.current[startConfigKey] = currentRk;
+    }
+
+    measuresPlayedRef.current = 0;
+    segmentStartHitsRef.current = 0;
+    segmentStartDurationMsRef.current = 0;
+    segmentMeasuresCompletedRef.current = 0;
+    setSegmentMeasuresCompleted(0);
+    lastMeasurePaceRef.current = null;
+    setCurrentPace(null);
+    setPaceTrend(null);
+
+    if (!isPlayingRef.current) {
+      const now = new Date();
+      setStartTime(now.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      setStartDateTime(now);
+      setElapsedMinutes(0);
+      setActiveDurationMs(0);
+      activeDurationMsRef.current = 0;
+      setCorrectHits(0);
+      correctHitsRef.current = 0;
+      setIsPlaying(true);
+      isPlayingRef.current = true;
+    }
+
+    generateMeasure();
+  }, [generateMeasure]);
+
   // Regenerate only when settings are manually changed while playing
   const isSettingsInitialMount = useRef(true);
   useEffect(() => {
@@ -1791,26 +2004,27 @@ const getPitchClass = (p: string): number | null => {
       if (wrongOctaveNote) {
         status = 'wrong-octave';
         // In listening mode (playing on physical instrument with mic/MIDI), do not deduct points
-        // because mic often misdetects pitch or catches ambient noise
+        // and do not show wrong-octave feedback cloud
         if (!isListeningModeActive) {
           setScore(s => Math.max(0, s - 3));
+          setFeedback({ 
+            type: 'wrong-octave', 
+            id: Date.now(), 
+            message: 'Inna oktawa' 
+          });
         }
-        setFeedback({ 
-          type: 'wrong-octave', 
-          id: Date.now(), 
-          message: isListeningModeActive ? 'Inna oktawa (bez kary)' : 'Inna oktawa' 
-        });
       } else {
         status = 'miss';
-        // In listening mode, do not deduct points for wrong sound or ambient room noise
+        // In listening mode, do not deduct points for wrong sound or ambient room noise,
+        // and do not show miss feedback cloud
         if (!isListeningModeActive) {
           setScore(s => Math.max(0, s - 5));
+          setFeedback({ 
+            type: 'miss', 
+            id: Date.now(), 
+            message: 'Nietrafione' 
+          });
         }
-        setFeedback({ 
-          type: 'miss', 
-          id: Date.now(), 
-          message: isListeningModeActive ? 'Nietrafione (bez kary)' : 'Nietrafione' 
-        });
       }
 
       // Auto-clear wrong key highlight after 450ms so keyboard stays clean while waiting
@@ -2040,6 +2254,36 @@ const getPitchClass = (p: string): number | null => {
             </div>
           )}
 
+          {isPracticeFromRecordsActive && (
+            <div className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl border transition-all ${
+              isDarkMode 
+                ? 'bg-amber-950/30 border-amber-500/40 text-amber-200' 
+                : 'bg-amber-50/90 border-amber-300 text-amber-900'
+            }`}>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Target size={14} className="text-amber-500 animate-pulse shrink-0" />
+                <span className="text-xs">
+                  Trening wybranych rekordów: <strong className="text-amber-400 font-bold">{selectedRecordKeysForTraining.filter(k => (highScores[k] || 0) > 0).length}</strong> {selectedRecordKeysForTraining.filter(k => (highScores[k] || 0) > 0).length === 1 ? 'wybrany zestaw' : (selectedRecordKeysForTraining.filter(k => (highScores[k] || 0) > 0).length < 5 ? 'wybrane zestawy' : 'wybranych zestawów')} (losowane co 4 takty)
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => setShowRecordsModal(true)}
+                  className="text-[11px] underline font-bold hover:text-amber-400 cursor-pointer"
+                >
+                  Zmień pulę
+                </button>
+                <button
+                  onClick={() => setIsPracticeFromRecordsActive(false)}
+                  className="p-1 rounded-md hover:bg-black/10 dark:hover:bg-white/10 text-xs font-semibold cursor-pointer"
+                  title="Wyłącz tryb treningu wybranych rekordów"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className={`flex flex-wrap items-center justify-center ${isCompact ? 'gap-1 md:gap-2' : 'gap-2 md:gap-4'} w-full sm:w-auto`}>
           {/* Key Signature Selector */}
           <select 
@@ -2261,10 +2505,37 @@ const getPitchClass = (p: string): number | null => {
                   setCurrentPace(null);
                   setPaceTrend(null);
                   measuresPlayedRef.current = 0;
-                  const keyToUse = selectedKeySignature === 'Random' ? activeKeySignatureRef.current : selectedKeySignature;
-                  const maxNotesToUse = selectedMaxNotes === 'Random' ? activeMaxNotesRef.current : selectedMaxNotes;
-                  const accidentalsToUse = selectedAccidentals === 'Random' ? activeUseAccidentalsRef.current : selectedAccidentals;
-                  const startConfigKey = `${keyToUse}_${maxNotesToUse}_${ledgerLines}_${accidentalsToUse ? 'acc' : 'noacc'}`;
+                  let keyToUse = selectedKeySignature === 'Random' ? activeKeySignatureRef.current : selectedKeySignature;
+                  let maxNotesToUse = selectedMaxNotes === 'Random' ? activeMaxNotesRef.current : selectedMaxNotes;
+                  let accidentalsToUse = selectedAccidentals === 'Random' ? activeUseAccidentalsRef.current : selectedAccidentals;
+                  let ledgerToUse = activeLedgerLinesRef.current;
+
+                  if (isPracticeFromRecordsActiveRef.current && selectedRecordKeysForTrainingRef.current.length > 0) {
+                    const pool = selectedRecordKeysForTrainingRef.current.filter(k => (highScoresRef.current[k] || 0) > 0);
+                    const effectivePool = pool.length > 0 ? pool : selectedRecordKeysForTrainingRef.current;
+                    if (effectivePool.length > 0) {
+                      const chosen = effectivePool[Math.floor(Math.random() * effectivePool.length)];
+                      const parsed = parseConfigKey(chosen);
+                      if (parsed) {
+                        if (KEY_SIGNATURES[parsed.keySignature as keyof typeof KEY_SIGNATURES]) {
+                          keyToUse = parsed.keySignature as keyof typeof KEY_SIGNATURES;
+                          activeKeySignatureRef.current = keyToUse;
+                          setActiveKeySignature(keyToUse);
+                        }
+                        maxNotesToUse = parsed.rawNotes;
+                        activeMaxNotesRef.current = maxNotesToUse;
+                        setActiveMaxNotes(maxNotesToUse);
+                        accidentalsToUse = parsed.rawAccidentals === 1;
+                        activeUseAccidentalsRef.current = accidentalsToUse;
+                        setActiveUseAccidentals(accidentalsToUse);
+                        ledgerToUse = parsed.rawLedger;
+                        activeLedgerLinesRef.current = ledgerToUse;
+                        setLedgerLines(ledgerToUse);
+                      }
+                    }
+                  }
+
+                  const startConfigKey = `${keyToUse}_${maxNotesToUse}_${ledgerToUse}_${accidentalsToUse ? 'acc' : 'noacc'}`;
                   const currentRec = highScoresRef.current[startConfigKey] || 0;
                   const currentRk = currentRec > 0 ? getRankForConfig(highScoresRef.current, startConfigKey) : null;
                   segmentInitialRecordRef.current = currentRec;
@@ -2366,7 +2637,7 @@ const getPitchClass = (p: string): number | null => {
         <section className={`relative md:flex-1 md:min-h-0 rounded-xl transition-all duration-500 w-full ${keyChangeAlert ? 'ring-4 ring-amber-400 shadow-[0_0_25px_rgba(245,158,11,0.45)]' : ''}`}>
           {/* Feedback Pill - Centered on top border outside the canvas frame so it never obscures any notes */}
           <AnimatePresence>
-            {feedback && (
+            {feedback && (!(audioInputStatus.isMicActive || audioInputStatus.isMidiConnected) || feedback.type === 'hit') && (
               <motion.div
                 key={feedback.id}
                 initial={{ opacity: 0, y: -6, scale: 0.9 }}
@@ -2989,8 +3260,90 @@ const getPitchClass = (p: string): number | null => {
                 </div>
               )}
 
+              {/* Training with Selected Records Bar */}
+              {(Object.entries(highScores) as [string, number][]).filter(([_, scoreVal]) => scoreVal > 0).length > 0 && (
+                <div className={`px-4 py-3 border-b text-xs flex flex-col gap-2.5 ${
+                  isPracticeFromRecordsActive
+                    ? (isDarkMode ? 'bg-amber-950/25 border-amber-500/30' : 'bg-amber-50 border-amber-200')
+                    : (isDarkMode ? 'border-zinc-800 bg-zinc-950/50' : 'border-neutral-100 bg-neutral-50/80')
+                }`}>
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <Target className={`w-4 h-4 shrink-0 ${isPracticeFromRecordsActive ? 'text-amber-400 animate-pulse' : 'text-zinc-400'}`} />
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-neutral-900 dark:text-zinc-100">
+                            Ćwicz wybrane rekordy
+                          </span>
+                          {isPracticeFromRecordsActive && (
+                            <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-400 text-black shadow-xs">
+                              Aktywny
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-neutral-500 dark:text-zinc-400">
+                          Zaznacz rekordy poniżej. Gra co 4 takty będzie losować parametry wyłącznie z tej wybranej puli.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0 ml-auto">
+                      {isPracticeFromRecordsActive && (
+                        <button
+                          onClick={() => setIsPracticeFromRecordsActive(false)}
+                          className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-red-500/40 text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
+                        >
+                          Wyłącz tryb
+                        </button>
+                      )}
+                      <button
+                        onClick={() => startTrainingSelectedRecords()}
+                        disabled={selectedRecordKeysForTraining.filter(k => (highScores[k] || 0) > 0).length === 0}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all shadow-md cursor-pointer ${
+                          selectedRecordKeysForTraining.filter(k => (highScores[k] || 0) > 0).length > 0
+                            ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black active:scale-95 shadow-amber-500/20'
+                            : 'bg-zinc-800 text-zinc-500 cursor-not-allowed border border-zinc-700'
+                        }`}
+                        title={
+                          selectedRecordKeysForTraining.filter(k => (highScores[k] || 0) > 0).length === 0
+                            ? 'Zaznacz przynajmniej jeden rekord z listy poniżej'
+                            : 'Rozpocznij grę z rotacją co 4 takty po zaznaczonych rekordach'
+                        }
+                      >
+                        <Play size={13} fill="currentColor" />
+                        <span>
+                          Ćwicz zaznaczone ({selectedRecordKeysForTraining.filter(k => (highScores[k] || 0) > 0).length})
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Selection helpers: Select all, Deselect, Counter */}
+                  <div className="flex items-center justify-between gap-2 text-[11px] pt-1 border-t border-zinc-800/40">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={selectAllRecordsForTraining}
+                        className="text-amber-500 hover:underline font-semibold cursor-pointer"
+                      >
+                        Zaznacz wszystkie
+                      </button>
+                      <span className="text-zinc-500">•</span>
+                      <button
+                        onClick={deselectAllRecordsForTraining}
+                        className="text-zinc-400 hover:underline font-medium cursor-pointer"
+                      >
+                        Odznacz wszystkie
+                      </button>
+                    </div>
+                    <span className="text-zinc-400 font-mono text-[11px]">
+                      Wybrano: <strong className="text-amber-400 font-bold">{selectedRecordKeysForTraining.filter(k => (highScores[k] || 0) > 0).length}</strong> z {(Object.entries(highScores) as [string, number][]).filter(([_, scoreVal]) => scoreVal > 0).length}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* List of records */}
-              <div className="p-4 overflow-y-auto flex-1 custom-scrollbar space-y-3">
+              <div className="p-3 sm:p-4 overflow-y-auto flex-1 custom-scrollbar space-y-1.5">
                 {(Object.entries(highScores) as [string, number][]).filter(([_, scoreVal]) => scoreVal > 0).length === 0 ? (
                   <div className="text-center py-10 flex flex-col items-center justify-center gap-2">
                     <Trophy className={`w-8 h-8 ${isDarkMode ? 'text-zinc-700' : 'text-neutral-300'}`} />
@@ -3011,61 +3364,93 @@ const getPitchClass = (p: string): number | null => {
                       const parsed = parseConfigKey(key);
                       const isCurrentConfig = key === configKey;
                       const isBeatenInSession = sessionBeatenKeys.has(key);
+                      const isSelectedForTraining = selectedRecordKeysForTraining.includes(key);
 
                       return (
                         <div
                           key={key}
-                          className={`p-3 rounded-xl border flex justify-between items-center transition-all gap-3 ${
-                            isBeatenInSession
+                          className={`px-3 py-2 rounded-xl border flex justify-between items-center transition-all gap-2 sm:gap-3 ${
+                            isSelectedForTraining
+                              ? (isDarkMode ? 'ring-1 ring-amber-500/50 bg-amber-950/20 border-amber-500/40' : 'ring-1 ring-amber-400 bg-amber-50/70 border-amber-300')
+                              : isBeatenInSession
                               ? (isDarkMode ? 'bg-emerald-950/20 border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.1)]' : 'bg-emerald-50/90 border-emerald-300')
                               : isCurrentConfig
                               ? (isDarkMode ? 'bg-amber-950/25 border-amber-500/50' : 'bg-amber-50/80 border-amber-300')
                               : (isDarkMode ? 'bg-zinc-950/40 border-zinc-800/80 hover:bg-zinc-950/80' : 'bg-neutral-50/50 border-neutral-200/80 hover:bg-neutral-50')
                           }`}
                         >
-                          <div className="flex flex-col gap-1.5 items-start">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-xs font-black px-2 py-0.5 rounded-md bg-neutral-200 dark:bg-zinc-800 text-black dark:text-zinc-100 font-mono">
-                                #{idx + 1}
-                              </span>
-                              <span className="font-bold text-sm">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            {/* Checkbox for training pool */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleRecordKeyForTraining(key);
+                              }}
+                              className={`p-0.5 rounded-md transition-colors cursor-pointer shrink-0 ${
+                                isSelectedForTraining
+                                  ? 'text-amber-500 bg-amber-500/20'
+                                  : (isDarkMode ? 'text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800' : 'text-neutral-400 hover:text-neutral-600 hover:bg-neutral-200')
+                              }`}
+                              title={isSelectedForTraining ? 'Odznacz z puli treningu' : 'Zaznacz do puli treningu (losowanie co 4 takty)'}
+                            >
+                              {isSelectedForTraining ? (
+                                <CheckSquare size={16} className="text-amber-500" />
+                              ) : (
+                                <Square size={16} />
+                              )}
+                            </button>
+
+                            <span className="text-xs font-black px-1.5 py-0.5 rounded-md bg-neutral-200 dark:bg-zinc-800 text-black dark:text-zinc-100 font-mono shrink-0">
+                              #{idx + 1}
+                            </span>
+
+                            {/* Horizontally aligned details */}
+                            <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                              <span className="font-bold text-xs sm:text-sm text-neutral-900 dark:text-zinc-100 shrink-0">
                                 {formatKeySignatureWithAccidentals(parsed.keySignature)}
                               </span>
+
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] border shrink-0 ${
+                                isDarkMode ? 'bg-zinc-800/80 border-zinc-700/80 text-zinc-300' : 'bg-white border-neutral-200 text-neutral-600'
+                              }`}>
+                                {parsed.maxNotesPerSpawn}
+                              </span>
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] border shrink-0 ${
+                                isDarkMode ? 'bg-zinc-800/80 border-zinc-700/80 text-zinc-300' : 'bg-white border-neutral-200 text-neutral-600'
+                              }`}>
+                                {parsed.ledgerLines}
+                              </span>
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] border shrink-0 ${
+                                isDarkMode ? 'bg-zinc-800/80 border-zinc-700/80 text-zinc-300' : 'bg-white border-neutral-200 text-neutral-600'
+                              }`}>
+                                {parsed.useAccidentals}
+                              </span>
+
+                              {isSelectedForTraining && (
+                                <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-500 border border-amber-500/40 shrink-0">
+                                  Do treningu
+                                </span>
+                              )}
                               {isCurrentConfig && (
-                                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-400 text-black shadow-xs">
+                                <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-amber-400 text-black shadow-xs shrink-0">
                                   Aktualne {initialRank && initialRank !== idx + 1 ? `(#${initialRank} -> #${idx + 1})` : ''}
                                 </span>
                               )}
                               {isBeatenInSession && (
-                                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-500 text-black animate-pulse">
+                                <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-500 text-black animate-pulse shrink-0">
                                   Pobity w tej sesji!
                                 </span>
                               )}
                             </div>
-
-                            <div className="flex flex-wrap gap-1.5 text-[11px]">
-                              <span className={`px-2 py-0.5 rounded-md border ${
-                                isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-neutral-200 text-neutral-600'
-                              }`}>
-                                {parsed.maxNotesPerSpawn}
-                              </span>
-                              <span className={`px-2 py-0.5 rounded-md border ${
-                                isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-neutral-200 text-neutral-600'
-                              }`}>
-                                {parsed.ledgerLines}
-                              </span>
-                              <span className={`px-2 py-0.5 rounded-md border ${
-                                isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-neutral-200 text-neutral-600'
-                              }`}>
-                                {parsed.useAccidentals}
-                              </span>
-                            </div>
                           </div>
 
                           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-                            <div className="flex flex-col items-end mr-1">
-                              <span className="text-[10px] uppercase font-bold text-neutral-400 dark:text-zinc-500 tracking-wider">Rekord</span>
-                              <span className={`text-sm font-mono font-black ${
+                            <div className="flex items-baseline gap-1 text-right">
+                              <span className="text-[9px] uppercase font-bold text-neutral-400 dark:text-zinc-500 tracking-wider">
+                                Rekord:
+                              </span>
+                              <span className={`text-xs sm:text-sm font-mono font-black ${
                                 isBeatenInSession
                                   ? 'text-emerald-600 dark:text-emerald-400'
                                   : (isDarkMode ? 'text-zinc-200' : 'text-neutral-800')
