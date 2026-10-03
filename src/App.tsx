@@ -9,7 +9,7 @@ import { Piano } from './components/Piano';
 import { Staff } from './components/Staff';
 import { audioService } from './services/audioService';
 import { audioInputService, AudioInputStatus } from './services/audioInputService';
-import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock, Sun, Moon, Volume2, VolumeX, TrendingUp, History, Calendar, Trash2, X, SlidersHorizontal, Plus, ChevronDown, ChevronUp, Mic, MicOff, Radio, SkipForward, Lightbulb, HelpCircle, Info, CheckCircle2, Download, Smartphone, Laptop, Wifi, WifiOff, ArrowUp, ArrowDown, Target, CheckSquare, Square } from 'lucide-react';
+import { Play, Pause, RotateCcw, Settings, Music, Trophy, Clock, Sun, Moon, Volume2, VolumeX, TrendingUp, History, Calendar, Trash2, X, SlidersHorizontal, Plus, ChevronDown, ChevronUp, Mic, MicOff, Radio, SkipForward, Lightbulb, HelpCircle, Info, CheckCircle2, Download, Smartphone, Laptop, Wifi, WifiOff, ArrowUp, ArrowDown, Target, CheckSquare, Square, Filter, FilterX } from 'lucide-react';
 
 interface Note {
   id: number;
@@ -669,6 +669,7 @@ export default function App() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showRecordsModal, setShowRecordsModal] = useState(false);
   const [showClearRecordsConfirm, setShowClearRecordsConfirm] = useState(false);
+  const [showPracticeModeLockDialog, setShowPracticeModeLockDialog] = useState(false);
   const [showOfflineModal, setShowOfflineModal] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
@@ -679,6 +680,18 @@ export default function App() {
     { field: 'ledger', order: 'desc' }
   ]);
   const [showAdvancedSortPanel, setShowAdvancedSortPanel] = useState(false);
+  const [showFilterPanel, setShowFilterPanel] = useState(true);
+  const [recordFilters, setRecordFilters] = useState<{
+    keySignature: string;
+    notes: string;
+    ledger: string;
+    accidentals: string;
+  }>({
+    keySignature: 'all',
+    notes: 'all',
+    ledger: 'all',
+    accidentals: 'all'
+  });
   const [history, setHistory] = useState<HistoryItem[]>(() => {
     const saved = localStorage.getItem('piano_practice_history');
     if (saved) {
@@ -754,10 +767,17 @@ export default function App() {
     setIsPracticeFromRecordsActive(false);
   }, []);
 
-  const keyToUse = selectedKeySignature === 'Random' ? activeKeySignature : selectedKeySignature;
-  const maxNotesToUse = selectedMaxNotes === 'Random' ? activeMaxNotes : selectedMaxNotes;
-  const accidentalsToUse = selectedAccidentals === 'Random' ? activeUseAccidentals : selectedAccidentals;
-  const configKey = `${keyToUse}_${maxNotesToUse}_${ledgerLines}_${accidentalsToUse ? 'acc' : 'noacc'}`;
+  const handleDisablePracticeFromRecords = useCallback(() => {
+    setIsPracticeFromRecordsActive(false);
+    isPracticeFromRecordsActiveRef.current = false;
+    setShowPracticeModeLockDialog(false);
+  }, []);
+
+  const keyToUse = isPracticeFromRecordsActive ? activeKeySignature : (selectedKeySignature === 'Random' ? activeKeySignature : selectedKeySignature);
+  const maxNotesToUse = isPracticeFromRecordsActive ? activeMaxNotes : (selectedMaxNotes === 'Random' ? activeMaxNotes : selectedMaxNotes);
+  const accidentalsToUse = isPracticeFromRecordsActive ? activeUseAccidentals : (selectedAccidentals === 'Random' ? activeUseAccidentals : selectedAccidentals);
+  const ledgerToUse = isPracticeFromRecordsActive ? (activeLedgerLinesRef.current ?? ledgerLines) : ledgerLines;
+  const configKey = `${keyToUse}_${maxNotesToUse}_${ledgerToUse}_${accidentalsToUse ? 'acc' : 'noacc'}`;
   const configRecord = highScores[configKey] || 0;
 
   const allValidRecords = useMemo(() => {
@@ -765,6 +785,83 @@ export default function App() {
       .filter(([_, scoreVal]) => scoreVal > 0)
       .sort((a, b) => b[1] - a[1]);
   }, [highScores]);
+
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (recordFilters.keySignature !== 'all') count++;
+    if (recordFilters.notes !== 'all') count++;
+    if (recordFilters.ledger !== 'all') count++;
+    if (recordFilters.accidentals !== 'all') count++;
+    return count;
+  }, [recordFilters]);
+
+  const resetRecordFilters = useCallback(() => {
+    setRecordFilters({
+      keySignature: 'all',
+      notes: 'all',
+      ledger: 'all',
+      accidentals: 'all'
+    });
+  }, []);
+
+  const sortedRecordsForModal = useMemo(() => {
+    return (Object.entries(highScores) as [string, number][])
+      .filter(([_, scoreVal]) => scoreVal > 0)
+      .sort(([keyA, scoreA], [keyB, scoreB]) =>
+        compareParsedRecords(keyA, scoreA, keyB, scoreB, sortRules)
+      );
+  }, [highScores, sortRules]);
+
+  const availableKeysInRecords = useMemo(() => {
+    const keysSet = new Set<string>();
+    sortedRecordsForModal.forEach(([k]) => {
+      const parsed = parseConfigKey(k);
+      if (parsed && parsed.keySignature) {
+        keysSet.add(parsed.keySignature);
+      }
+    });
+    const orderMap = Object.keys(KEY_SIGNATURES);
+    return Array.from(keysSet).sort((a, b) => {
+      const idxA = orderMap.indexOf(a);
+      const idxB = orderMap.indexOf(b);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b);
+    });
+  }, [sortedRecordsForModal]);
+
+  const filteredRecords = useMemo(() => {
+    return sortedRecordsForModal.filter(([key]) => {
+      const parsed = parseConfigKey(key);
+      if (!parsed) return true;
+      if (recordFilters.keySignature !== 'all' && parsed.keySignature !== recordFilters.keySignature) {
+        return false;
+      }
+      if (recordFilters.notes !== 'all' && parsed.rawNotes !== parseInt(recordFilters.notes, 10)) {
+        return false;
+      }
+      if (recordFilters.ledger !== 'all' && parsed.rawLedger !== parseInt(recordFilters.ledger, 10)) {
+        return false;
+      }
+      if (recordFilters.accidentals !== 'all') {
+        const isAcc = parsed.rawAccidentals === 1;
+        if (recordFilters.accidentals === 'acc' && !isAcc) return false;
+        if (recordFilters.accidentals === 'noacc' && isAcc) return false;
+      }
+      return true;
+    });
+  }, [sortedRecordsForModal, recordFilters]);
+
+  const selectFilteredRecordsForTraining = useCallback(() => {
+    const visibleKeys = filteredRecords.map(([k]) => k);
+    setSelectedRecordKeysForTraining(prev => Array.from(new Set([...prev, ...visibleKeys])));
+  }, [filteredRecords]);
+
+  const deselectFilteredRecordsForTraining = useCallback(() => {
+    const visibleKeySet = new Set(filteredRecords.map(([k]) => k));
+    setSelectedRecordKeysForTraining(prev => prev.filter(k => !visibleKeySet.has(k)));
+  }, [filteredRecords]);
 
   const currentConfigRank = useMemo(() => {
     if (configRecord <= 0) return null;
@@ -997,7 +1094,7 @@ export default function App() {
       lastTime = now;
 
       const isDocumentActive = !document.hidden;
-      const isModalOpen = showHistory || showRecordsModal || Boolean(keyChangeAlert);
+      const isModalOpen = showHistory || showRecordsModal || Boolean(keyChangeAlert) || showPracticeModeLockDialog;
 
       if (isDocumentActive && !isModalOpen && delta > 0 && delta <= 1500) {
         setActiveDurationMs(prev => {
@@ -1014,7 +1111,7 @@ export default function App() {
       window.removeEventListener('blur', handleResetTime);
       window.removeEventListener('focus', handleResetTime);
     };
-  }, [isPlaying, showHistory, showRecordsModal, keyChangeAlert]);
+  }, [isPlaying, showHistory, showRecordsModal, keyChangeAlert, showPracticeModeLockDialog]);
 
   useEffect(() => {
     localStorage.setItem('piano_note_master_dark_mode', String(isDarkMode));
@@ -1162,6 +1259,10 @@ export default function App() {
   }, [ledgerLines]);
 
   const handleKeySignatureChange = useCallback((val: keyof typeof KEY_SIGNATURES | 'Random') => {
+    if (isPracticeFromRecordsActiveRef.current) {
+      setShowPracticeModeLockDialog(true);
+      return;
+    }
     setSelectedKeySignature(val);
     const wasPlaying = isPlayingRef.current;
     const finishedKey = activeKeySignatureRef.current;
@@ -1252,6 +1353,10 @@ export default function App() {
   }, [createFinishedSegmentSummary, ledgerLines, selectedAccidentals]);
 
   const handleMaxNotesChange = useCallback((val: number | 'Random') => {
+    if (isPracticeFromRecordsActiveRef.current) {
+      setShowPracticeModeLockDialog(true);
+      return;
+    }
     setSelectedMaxNotes(val);
     const wasPlaying = isPlayingRef.current;
     const finishedKey = activeKeySignatureRef.current;
@@ -1344,6 +1449,10 @@ export default function App() {
   }, [createFinishedSegmentSummary, selectedKeySignature, ledgerLines, selectedAccidentals]);
 
   const handleAccidentalsChange = useCallback((val: boolean | 'Random') => {
+    if (isPracticeFromRecordsActiveRef.current) {
+      setShowPracticeModeLockDialog(true);
+      return;
+    }
     setSelectedAccidentals(val);
     const wasPlaying = isPlayingRef.current;
     const finishedKey = activeKeySignatureRef.current;
@@ -1434,6 +1543,14 @@ export default function App() {
     }
   }, [createFinishedSegmentSummary, selectedKeySignature, selectedMaxNotes, ledgerLines]);
 
+  const handleLedgerLinesChange = useCallback((val: number) => {
+    if (isPracticeFromRecordsActiveRef.current) {
+      setShowPracticeModeLockDialog(true);
+      return;
+    }
+    setLedgerLines(val);
+  }, []);
+
   const handleApplyRecordConfig = useCallback((keyToApply: string) => {
     const parsed = parseConfigKey(keyToApply);
     if (!parsed) return;
@@ -1468,12 +1585,12 @@ export default function App() {
     if (isCustomPool) {
       const isNewRun = measuresPlayedRef.current === 0;
       const needsChange = !isNewRun && (measuresPlayedRef.current % 4 === 0);
+      const pool = selectedRecordKeysForTrainingRef.current.filter(k => (highScoresRef.current[k] || 0) > 0);
+      const effectivePool = pool.length > 0 ? pool : selectedRecordKeysForTrainingRef.current;
+      const currentConfigKey = `${currentKey}_${currentMaxNotes}_${currentLedger}_${currentAccidentals ? 'acc' : 'noacc'}`;
+      const isAlreadyInPool = effectivePool.includes(currentConfigKey);
 
-      if (isNewRun || needsChange) {
-        const pool = selectedRecordKeysForTrainingRef.current.filter(k => (highScoresRef.current[k] || 0) > 0);
-        const effectivePool = pool.length > 0 ? pool : selectedRecordKeysForTrainingRef.current;
-        const currentConfigKey = `${currentKey}_${currentMaxNotes}_${currentLedger}_${currentAccidentals ? 'acc' : 'noacc'}`;
-
+      if (needsChange || (isNewRun && !isAlreadyInPool)) {
         let nextConfigKeyToApply: string;
         if (effectivePool.length > 1) {
           const differentPool = effectivePool.filter(k => k !== currentConfigKey);
@@ -1515,14 +1632,17 @@ export default function App() {
         currentKey = nextKey;
         activeKeySignatureRef.current = nextKey;
         setActiveKeySignature(nextKey);
+        setSelectedKeySignature(nextKey);
 
         currentMaxNotes = nextMaxNotes;
         activeMaxNotesRef.current = nextMaxNotes;
         setActiveMaxNotes(nextMaxNotes);
+        setSelectedMaxNotes(nextMaxNotes);
 
         currentAccidentals = nextAccidentals;
         activeUseAccidentalsRef.current = nextAccidentals;
         setActiveUseAccidentals(nextAccidentals);
+        setSelectedAccidentals(nextAccidentals);
 
         currentLedger = nextLedger;
         activeLedgerLinesRef.current = nextLedger;
@@ -1834,11 +1954,14 @@ export default function App() {
       if (KEY_SIGNATURES[parsed.keySignature as keyof typeof KEY_SIGNATURES]) {
         activeKeySignatureRef.current = parsed.keySignature as keyof typeof KEY_SIGNATURES;
         setActiveKeySignature(parsed.keySignature as keyof typeof KEY_SIGNATURES);
+        setSelectedKeySignature(parsed.keySignature as keyof typeof KEY_SIGNATURES);
       }
       activeMaxNotesRef.current = parsed.rawNotes;
       setActiveMaxNotes(parsed.rawNotes);
+      setSelectedMaxNotes(parsed.rawNotes);
       activeUseAccidentalsRef.current = parsed.rawAccidentals === 1;
       setActiveUseAccidentals(parsed.rawAccidentals === 1);
+      setSelectedAccidentals(parsed.rawAccidentals === 1);
       activeLedgerLinesRef.current = parsed.rawLedger;
       setLedgerLines(parsed.rawLedger);
 
@@ -1860,18 +1983,16 @@ export default function App() {
     setCurrentPace(null);
     setPaceTrend(null);
 
-    if (!isPlayingRef.current) {
-      const now = new Date();
-      setStartTime(now.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-      setStartDateTime(now);
-      setElapsedMinutes(0);
-      setActiveDurationMs(0);
-      activeDurationMsRef.current = 0;
-      setCorrectHits(0);
-      correctHitsRef.current = 0;
-      setIsPlaying(true);
-      isPlayingRef.current = true;
-    }
+    // Prepare the exercise ready on the staff, but wait for explicit Start click
+    setIsPlaying(false);
+    isPlayingRef.current = false;
+    setStartTime(null);
+    setStartDateTime(null);
+    setElapsedMinutes(0);
+    setActiveDurationMs(0);
+    activeDurationMsRef.current = 0;
+    setCorrectHits(0);
+    correctHitsRef.current = 0;
 
     generateMeasure();
   }, [generateMeasure]);
@@ -1883,7 +2004,7 @@ export default function App() {
       isSettingsInitialMount.current = false;
       return;
     }
-    if (isPlayingRef.current) {
+    if (isPlayingRef.current && !isPracticeFromRecordsActiveRef.current) {
       generateMeasure();
     }
   }, [selectedAccidentals, selectedKeySignature, selectedMaxNotes, ledgerLines, generateMeasure]);
@@ -2255,27 +2376,37 @@ const getPitchClass = (p: string): number | null => {
           )}
 
           {isPracticeFromRecordsActive && (
-            <div className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl border transition-all ${
+            <div className={`w-full flex items-center justify-between gap-1.5 px-2.5 py-0.5 rounded-lg border transition-all h-7 overflow-hidden flex-nowrap ${
               isDarkMode 
-                ? 'bg-amber-950/30 border-amber-500/40 text-amber-200' 
-                : 'bg-amber-50/90 border-amber-300 text-amber-900'
+                ? 'bg-amber-950/40 border-amber-500/40 text-amber-200' 
+                : 'bg-amber-50 border-amber-300 text-amber-900'
             }`}>
-              <div className="flex items-center gap-2 flex-wrap">
-                <Target size={14} className="text-amber-500 animate-pulse shrink-0" />
-                <span className="text-xs">
-                  Trening wybranych rekordów: <strong className="text-amber-400 font-bold">{selectedRecordKeysForTraining.filter(k => (highScores[k] || 0) > 0).length}</strong> {selectedRecordKeysForTraining.filter(k => (highScores[k] || 0) > 0).length === 1 ? 'wybrany zestaw' : (selectedRecordKeysForTraining.filter(k => (highScores[k] || 0) > 0).length < 5 ? 'wybrane zestawy' : 'wybranych zestawów')} (losowane co 4 takty)
+              <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
+                <Target size={13} className="text-amber-500 animate-pulse shrink-0" />
+                <span className="text-[11px] sm:text-xs truncate font-medium">
+                  <span className="hidden sm:inline">Trening rekordów:</span>
+                  <span className="sm:hidden">Trening:</span>{' '}
+                  <strong className="text-amber-500 dark:text-amber-400 font-black">
+                    {selectedRecordKeysForTraining.filter(k => (highScores[k] || 0) > 0).length}
+                  </strong>{' '}
+                  {(() => {
+                    const count = selectedRecordKeysForTraining.filter(k => (highScores[k] || 0) > 0).length;
+                    return count === 1 ? 'zestaw' : (count < 5 ? 'zestawy' : 'zestawów');
+                  })()}{' '}
+                  <span className="text-[10px] opacity-75 hidden sm:inline">(rotacja co 4 takty)</span>
                 </span>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1 shrink-0">
                 <button
                   onClick={() => setShowRecordsModal(true)}
-                  className="text-[11px] underline font-bold hover:text-amber-400 cursor-pointer"
+                  className="text-[10px] sm:text-[11px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/30 whitespace-nowrap cursor-pointer transition-colors leading-none"
+                  title="Zarządzaj wybranymi rekordami do ćwiczeń"
                 >
-                  Zmień pulę
+                  Zmień
                 </button>
                 <button
                   onClick={() => setIsPracticeFromRecordsActive(false)}
-                  className="p-1 rounded-md hover:bg-black/10 dark:hover:bg-white/10 text-xs font-semibold cursor-pointer"
+                  className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 text-neutral-500 dark:text-zinc-400 hover:text-red-500 transition-colors cursor-pointer leading-none"
                   title="Wyłącz tryb treningu wybranych rekordów"
                 >
                   <X size={13} />
@@ -2287,13 +2418,30 @@ const getPitchClass = (p: string): number | null => {
           <div className={`flex flex-wrap items-center justify-center ${isCompact ? 'gap-1 md:gap-2' : 'gap-2 md:gap-4'} w-full sm:w-auto`}>
           {/* Key Signature Selector */}
           <select 
-            value={selectedKeySignature}
-            onChange={(e) => handleKeySignatureChange(e.target.value as any)}
+            value={isPracticeFromRecordsActive ? activeKeySignature : selectedKeySignature}
+            onMouseDown={(e) => {
+              if (isPracticeFromRecordsActive) {
+                e.preventDefault();
+                setShowPracticeModeLockDialog(true);
+              }
+            }}
+            onChange={(e) => {
+              if (isPracticeFromRecordsActive) {
+                setShowPracticeModeLockDialog(true);
+                return;
+              }
+              handleKeySignatureChange(e.target.value as any);
+            }}
             className={`${isCompact ? 'text-[10px]' : 'text-xs md:text-sm'} rounded-full px-3 py-1 shadow-sm outline-none focus:ring-2 focus:ring-blue-500 border transition-all ${
-              isDarkMode ? 'bg-zinc-900 border-zinc-805 text-zinc-100' : 'bg-white border-neutral-200 text-neutral-900'
+              isPracticeFromRecordsActive ? 'cursor-pointer ring-1 ring-amber-500/50 font-bold' : ''
+            } ${
+              isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-100' : 'bg-white border-neutral-200 text-neutral-900'
             }`}
+            title={isPracticeFromRecordsActive ? `Ćwiczona tonacja: ${activeKeySignature} (kliknij, aby zarządzać trybem)` : undefined}
           >
-            <option value="Random" className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>Losowo (co 4 takty)</option>
+            {!isPracticeFromRecordsActive && (
+              <option value="Random" className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>Losowo (co 4 takty)</option>
+            )}
             {Object.keys(KEY_SIGNATURES).map(k => (
               <option key={k} value={k} className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>{k}</option>
             ))}
@@ -2301,15 +2449,36 @@ const getPitchClass = (p: string): number | null => {
 
           {/* Accidentals Selector */}
           <div 
+            onClick={() => {
+              if (isPracticeFromRecordsActive) {
+                setShowPracticeModeLockDialog(true);
+              }
+            }}
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full shadow-sm border transition-all ${
+              isPracticeFromRecordsActive ? 'cursor-pointer ring-1 ring-amber-500/50' : ''
+            } ${
               isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-200' : 'bg-white border-neutral-200 text-neutral-900'
             }`}
-            title={selectedAccidentals === 'Random' ? `Znaki przypadkowe: Losowo (aktualnie ${activeUseAccidentals ? 'WŁ' : 'WYŁ'}, co 4 takty)` : `Znaki przypadkowe: ${activeUseAccidentals ? 'WŁ' : 'WYŁ'}`}
+            title={
+              isPracticeFromRecordsActive
+                ? `Znaki przygodne w tym rekordzie: ${activeUseAccidentals ? 'WŁ' : 'WYŁ'} (kliknij, aby zarządzać trybem)`
+                : (selectedAccidentals === 'Random' ? `Znaki przypadkowe: Losowo (aktualnie ${activeUseAccidentals ? 'WŁ' : 'WYŁ'}, co 4 takty)` : `Znaki przypadkowe: ${activeUseAccidentals ? 'WŁ' : 'WYŁ'}`)
+            }
           >
             {!isCompact && <span className={`text-[10px] font-bold uppercase ${isDarkMode ? 'text-zinc-500' : 'text-neutral-400'}`}>Znaki:</span>}
             <select 
-              value={selectedAccidentals === 'Random' ? 'Random' : (selectedAccidentals ? 'ON' : 'OFF')}
+              value={isPracticeFromRecordsActive ? (activeUseAccidentals ? 'ON' : 'OFF') : (selectedAccidentals === 'Random' ? 'Random' : (selectedAccidentals ? 'ON' : 'OFF'))}
+              onMouseDown={(e) => {
+                if (isPracticeFromRecordsActive) {
+                  e.preventDefault();
+                  setShowPracticeModeLockDialog(true);
+                }
+              }}
               onChange={(e) => {
+                if (isPracticeFromRecordsActive) {
+                  setShowPracticeModeLockDialog(true);
+                  return;
+                }
                 const val = e.target.value;
                 if (val === 'Random') {
                   handleAccidentalsChange('Random');
@@ -2321,9 +2490,11 @@ const getPitchClass = (p: string): number | null => {
               }}
               className={`${isCompact ? 'text-[10px]' : 'text-xs'} font-bold outline-none bg-transparent cursor-pointer ${isDarkMode ? 'text-zinc-200 [&>option]:bg-zinc-900 [&>option]:text-zinc-100' : 'text-neutral-900'}`}
             >
-              <option value="Random" className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>
-                Losowo
-              </option>
+              {!isPracticeFromRecordsActive && (
+                <option value="Random" className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>
+                  Losowo
+                </option>
+              )}
               <option value="ON" className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>
                 WŁ (ON)
               </option>
@@ -2331,7 +2502,7 @@ const getPitchClass = (p: string): number | null => {
                 WYŁ (OFF)
               </option>
             </select>
-            {selectedAccidentals === 'Random' ? (
+            {selectedAccidentals === 'Random' && !isPracticeFromRecordsActive ? (
               <span 
                 className={`text-[10px] font-black px-1.5 py-0.5 rounded leading-none shrink-0 ${
                   activeUseAccidentals
@@ -2348,14 +2519,36 @@ const getPitchClass = (p: string): number | null => {
           </div>
 
           {/* Ledger Lines Selector */}
-          <div className={`flex items-center gap-2 px-3 py-1 rounded-full shadow-sm border transition-all ${
-            isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-200' : 'bg-white border-neutral-200 text-neutral-900'
-          }`}>
+          <div 
+            onClick={() => {
+              if (isPracticeFromRecordsActive) {
+                setShowPracticeModeLockDialog(true);
+              }
+            }}
+            className={`flex items-center gap-2 px-3 py-1 rounded-full shadow-sm border transition-all ${
+              isPracticeFromRecordsActive ? 'cursor-pointer ring-1 ring-amber-500/50' : ''
+            } ${
+              isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-200' : 'bg-white border-neutral-200 text-neutral-900'
+            }`}
+            title={isPracticeFromRecordsActive ? `Linie dodane w tym rekordzie: ${ledgerLines} (kliknij, aby zarządzać trybem)` : undefined}
+          >
             {!isCompact && <span className={`text-[10px] font-bold uppercase ${isDarkMode ? 'text-zinc-500' : 'text-neutral-400'}`}>Lines:</span>}
             <select 
               value={ledgerLines}
-              onChange={(e) => setLedgerLines(parseInt(e.target.value))}
-              className={`${isCompact ? 'text-[10px]' : 'text-xs'} font-bold outline-none bg-transparent ${isDarkMode ? 'text-zinc-200 [&>option]:bg-zinc-900 [&>option]:text-zinc-205' : 'text-neutral-900'}`}
+              onMouseDown={(e) => {
+                if (isPracticeFromRecordsActive) {
+                  e.preventDefault();
+                  setShowPracticeModeLockDialog(true);
+                }
+              }}
+              onChange={(e) => {
+                if (isPracticeFromRecordsActive) {
+                  setShowPracticeModeLockDialog(true);
+                  return;
+                }
+                handleLedgerLinesChange(parseInt(e.target.value));
+              }}
+              className={`${isCompact ? 'text-[10px]' : 'text-xs'} font-bold outline-none bg-transparent cursor-pointer ${isDarkMode ? 'text-zinc-200 [&>option]:bg-zinc-900 [&>option]:text-zinc-200' : 'text-neutral-900'}`}
             >
               {[1, 2, 3, 4, 5].map(v => (
                 <option key={v} value={v} className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>{isCompact ? `L${v}` : v}</option>
@@ -2365,25 +2558,50 @@ const getPitchClass = (p: string): number | null => {
 
           {/* Max Notes Per Spawn Selector */}
           <div 
+            onClick={() => {
+              if (isPracticeFromRecordsActive) {
+                setShowPracticeModeLockDialog(true);
+              }
+            }}
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full shadow-sm border transition-all ${
+              isPracticeFromRecordsActive ? 'cursor-pointer ring-1 ring-amber-500/50' : ''
+            } ${
               isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-200' : 'bg-white border-neutral-200 text-neutral-900'
             }`}
-            title={selectedMaxNotes === 'Random' ? `Maks. nut: Losowo (aktualnie ${activeMaxNotes}, co 4 takty)` : `Maks. nut: ${selectedMaxNotes}`}
+            title={
+              isPracticeFromRecordsActive 
+                ? `Maks. nut w tym rekordzie: ${activeMaxNotes} (kliknij, aby zarządzać trybem)` 
+                : (selectedMaxNotes === 'Random' ? `Maks. nut: Losowo (aktualnie ${activeMaxNotes}, co 4 takty)` : `Maks. nut: ${selectedMaxNotes}`)
+            }
           >
             {!isCompact && <span className={`text-[10px] font-bold uppercase ${isDarkMode ? 'text-zinc-500' : 'text-neutral-400'}`}>Nut:</span>}
             <select 
-              value={selectedMaxNotes}
-              onChange={(e) => handleMaxNotesChange(e.target.value === 'Random' ? 'Random' : parseInt(e.target.value, 10))}
-              className={`${isCompact ? 'text-[10px]' : 'text-xs'} font-bold outline-none bg-transparent cursor-pointer ${isDarkMode ? 'text-zinc-200 [&>option]:bg-zinc-900 [&>option]:text-zinc-205' : 'text-neutral-900'}`}
+              value={isPracticeFromRecordsActive ? activeMaxNotes : selectedMaxNotes}
+              onMouseDown={(e) => {
+                if (isPracticeFromRecordsActive) {
+                  e.preventDefault();
+                  setShowPracticeModeLockDialog(true);
+                }
+              }}
+              onChange={(e) => {
+                if (isPracticeFromRecordsActive) {
+                  setShowPracticeModeLockDialog(true);
+                  return;
+                }
+                handleMaxNotesChange(e.target.value === 'Random' ? 'Random' : parseInt(e.target.value, 10));
+              }}
+              className={`${isCompact ? 'text-[10px]' : 'text-xs'} font-bold outline-none bg-transparent cursor-pointer ${isDarkMode ? 'text-zinc-200 [&>option]:bg-zinc-900 [&>option]:text-zinc-200' : 'text-neutral-900'}`}
             >
-              <option value="Random" className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>
-                Losowo
-              </option>
+              {!isPracticeFromRecordsActive && (
+                <option value="Random" className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>
+                  Losowo
+                </option>
+              )}
               {[1, 2, 3, 4, 5].map(v => (
                 <option key={v} value={v} className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>{v}</option>
               ))}
             </select>
-            {selectedMaxNotes === 'Random' && (
+            {selectedMaxNotes === 'Random' && !isPracticeFromRecordsActive && (
               <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-amber-400 text-black leading-none shrink-0" title="Obecnie wylosowana maksymalna ilość nut w takcie">
                 {activeMaxNotes}
               </span>
@@ -2505,15 +2723,18 @@ const getPitchClass = (p: string): number | null => {
                   setCurrentPace(null);
                   setPaceTrend(null);
                   measuresPlayedRef.current = 0;
-                  let keyToUse = selectedKeySignature === 'Random' ? activeKeySignatureRef.current : selectedKeySignature;
-                  let maxNotesToUse = selectedMaxNotes === 'Random' ? activeMaxNotesRef.current : selectedMaxNotes;
-                  let accidentalsToUse = selectedAccidentals === 'Random' ? activeUseAccidentalsRef.current : selectedAccidentals;
+                  let keyToUse = isPracticeFromRecordsActiveRef.current ? activeKeySignatureRef.current : (selectedKeySignature === 'Random' ? activeKeySignatureRef.current : selectedKeySignature);
+                  let maxNotesToUse = isPracticeFromRecordsActiveRef.current ? activeMaxNotesRef.current : (selectedMaxNotes === 'Random' ? activeMaxNotesRef.current : selectedMaxNotes);
+                  let accidentalsToUse = isPracticeFromRecordsActiveRef.current ? activeUseAccidentalsRef.current : (selectedAccidentals === 'Random' ? activeUseAccidentalsRef.current : selectedAccidentals);
                   let ledgerToUse = activeLedgerLinesRef.current;
 
                   if (isPracticeFromRecordsActiveRef.current && selectedRecordKeysForTrainingRef.current.length > 0) {
                     const pool = selectedRecordKeysForTrainingRef.current.filter(k => (highScoresRef.current[k] || 0) > 0);
                     const effectivePool = pool.length > 0 ? pool : selectedRecordKeysForTrainingRef.current;
-                    if (effectivePool.length > 0) {
+                    const currentConfigKey = `${keyToUse}_${maxNotesToUse}_${ledgerToUse}_${accidentalsToUse ? 'acc' : 'noacc'}`;
+                    const isAlreadyInPool = effectivePool.includes(currentConfigKey);
+
+                    if ((!isAlreadyInPool || notesRef.current.length === 0) && effectivePool.length > 0) {
                       const chosen = effectivePool[Math.floor(Math.random() * effectivePool.length)];
                       const parsed = parseConfigKey(chosen);
                       if (parsed) {
@@ -2521,13 +2742,16 @@ const getPitchClass = (p: string): number | null => {
                           keyToUse = parsed.keySignature as keyof typeof KEY_SIGNATURES;
                           activeKeySignatureRef.current = keyToUse;
                           setActiveKeySignature(keyToUse);
+                          setSelectedKeySignature(keyToUse);
                         }
                         maxNotesToUse = parsed.rawNotes;
                         activeMaxNotesRef.current = maxNotesToUse;
                         setActiveMaxNotes(maxNotesToUse);
+                        setSelectedMaxNotes(maxNotesToUse);
                         accidentalsToUse = parsed.rawAccidentals === 1;
                         activeUseAccidentalsRef.current = accidentalsToUse;
                         setActiveUseAccidentals(accidentalsToUse);
+                        setSelectedAccidentals(accidentalsToUse);
                         ledgerToUse = parsed.rawLedger;
                         activeLedgerLinesRef.current = ledgerToUse;
                         setLedgerLines(ledgerToUse);
@@ -2549,7 +2773,9 @@ const getPitchClass = (p: string): number | null => {
                       [configKey]: currentConfigRank
                     }));
                   }
-                  generateMeasure();
+                  if (notesRef.current.length === 0) {
+                    generateMeasure();
+                  }
                 }
               }
               setIsPlaying(!isPlaying);
@@ -3260,6 +3486,185 @@ const getPitchClass = (p: string): number | null => {
                 </div>
               )}
 
+              {/* Filter Parameters Control Bar */}
+              {(Object.entries(highScores) as [string, number][]).filter(([_, scoreVal]) => scoreVal > 0).length > 0 && (
+                <div className={`px-4 py-2.5 border-b text-xs flex flex-col gap-2 ${
+                  isDarkMode ? 'border-zinc-800 bg-zinc-950/60' : 'border-neutral-100 bg-neutral-50/50'
+                }`}>
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowFilterPanel(prev => !prev)}
+                      className="flex items-center gap-1.5 font-bold text-neutral-800 dark:text-zinc-200 hover:text-amber-600 dark:hover:text-amber-400 transition-colors cursor-pointer"
+                    >
+                      <Filter size={14} className={activeFiltersCount > 0 ? 'text-amber-500 animate-pulse' : 'text-zinc-400'} />
+                      <span>Filtruj parametry</span>
+                      {activeFiltersCount > 0 && (
+                        <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-amber-400 text-black leading-none">
+                          {activeFiltersCount} {activeFiltersCount === 1 ? 'aktywny' : 'aktywne'}
+                        </span>
+                      )}
+                      <span className="text-[11px] font-normal text-zinc-500 dark:text-zinc-400">
+                        (widoczne: <strong className="font-bold text-amber-500">{filteredRecords.length}</strong> z {allValidRecords.length})
+                      </span>
+                      {showFilterPanel ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    </button>
+
+                    {activeFiltersCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={resetRecordFilters}
+                        className="flex items-center gap-1 text-[11px] font-semibold text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 cursor-pointer"
+                        title="Zresetuj wszystkie filtry parametrów"
+                      >
+                        <FilterX size={13} />
+                        <span>Wyczyść filtry</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Filter Selectors Grid */}
+                  {showFilterPanel && (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 animate-in fade-in duration-150">
+                      {/* Key Signature Filter */}
+                      <div className="flex flex-col gap-1">
+                        <div className="text-[10px] font-bold text-neutral-400 dark:text-zinc-500 uppercase flex items-center justify-between">
+                          <span>Tonacja</span>
+                          {recordFilters.keySignature !== 'all' && (
+                            <button
+                              type="button"
+                              onClick={() => setRecordFilters(prev => ({ ...prev, keySignature: 'all' }))}
+                              className="text-amber-500 hover:underline lowercase font-semibold cursor-pointer"
+                            >
+                              reset
+                            </button>
+                          )}
+                        </div>
+                        <select
+                          value={recordFilters.keySignature}
+                          onChange={(e) => setRecordFilters(prev => ({ ...prev, keySignature: e.target.value }))}
+                          className={`w-full text-xs px-2 py-1.5 rounded-lg border outline-none focus:ring-1 focus:ring-amber-500 transition-colors ${
+                            recordFilters.keySignature !== 'all'
+                              ? 'border-amber-500/60 bg-amber-500/10 text-amber-600 dark:text-amber-300 font-bold'
+                              : (isDarkMode ? 'bg-zinc-800/90 border-zinc-700 text-zinc-200' : 'bg-white border-neutral-300 text-neutral-800')
+                          }`}
+                        >
+                          <option value="all">Wszystkie ({allValidRecords.length})</option>
+                          {availableKeysInRecords.map(k => (
+                            <option key={k} value={k}>
+                              {k} ({allValidRecords.filter(([recKey]) => parseConfigKey(recKey)?.keySignature === k).length})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Max Notes Filter */}
+                      <div className="flex flex-col gap-1">
+                        <div className="text-[10px] font-bold text-neutral-400 dark:text-zinc-500 uppercase flex items-center justify-between">
+                          <span>Ilość nut</span>
+                          {recordFilters.notes !== 'all' && (
+                            <button
+                              type="button"
+                              onClick={() => setRecordFilters(prev => ({ ...prev, notes: 'all' }))}
+                              className="text-amber-500 hover:underline lowercase font-semibold cursor-pointer"
+                            >
+                              reset
+                            </button>
+                          )}
+                        </div>
+                        <select
+                          value={recordFilters.notes}
+                          onChange={(e) => setRecordFilters(prev => ({ ...prev, notes: e.target.value }))}
+                          className={`w-full text-xs px-2 py-1.5 rounded-lg border outline-none focus:ring-1 focus:ring-amber-500 transition-colors ${
+                            recordFilters.notes !== 'all'
+                              ? 'border-amber-500/60 bg-amber-500/10 text-amber-600 dark:text-amber-300 font-bold'
+                              : (isDarkMode ? 'bg-zinc-800/90 border-zinc-700 text-zinc-200' : 'bg-white border-neutral-300 text-neutral-800')
+                          }`}
+                        >
+                          <option value="all">Wszystkie (1-5)</option>
+                          {[1, 2, 3, 4, 5].map(n => {
+                            const count = allValidRecords.filter(([recKey]) => parseConfigKey(recKey)?.rawNotes === n).length;
+                            return (
+                              <option key={n} value={String(n)} disabled={count === 0}>
+                                {n} {n === 1 ? 'nuta' : (n < 5 ? 'nuty' : 'nut')} ({count})
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+
+                      {/* Ledger Lines Filter */}
+                      <div className="flex flex-col gap-1">
+                        <div className="text-[10px] font-bold text-neutral-400 dark:text-zinc-500 uppercase flex items-center justify-between">
+                          <span>Linie dodane</span>
+                          {recordFilters.ledger !== 'all' && (
+                            <button
+                              type="button"
+                              onClick={() => setRecordFilters(prev => ({ ...prev, ledger: 'all' }))}
+                              className="text-amber-500 hover:underline lowercase font-semibold cursor-pointer"
+                            >
+                              reset
+                            </button>
+                          )}
+                        </div>
+                        <select
+                          value={recordFilters.ledger}
+                          onChange={(e) => setRecordFilters(prev => ({ ...prev, ledger: e.target.value }))}
+                          className={`w-full text-xs px-2 py-1.5 rounded-lg border outline-none focus:ring-1 focus:ring-amber-500 transition-colors ${
+                            recordFilters.ledger !== 'all'
+                              ? 'border-amber-500/60 bg-amber-500/10 text-amber-600 dark:text-amber-300 font-bold'
+                              : (isDarkMode ? 'bg-zinc-800/90 border-zinc-700 text-zinc-200' : 'bg-white border-neutral-300 text-neutral-800')
+                          }`}
+                        >
+                          <option value="all">Wszystkie (1-5)</option>
+                          {[1, 2, 3, 4, 5].map(l => {
+                            const count = allValidRecords.filter(([recKey]) => parseConfigKey(recKey)?.rawLedger === l).length;
+                            return (
+                              <option key={l} value={String(l)} disabled={count === 0}>
+                                {l} {l === 1 ? 'linia' : (l < 5 ? 'linie' : 'linii')} ({count})
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+
+                      {/* Accidentals Filter */}
+                      <div className="flex flex-col gap-1">
+                        <div className="text-[10px] font-bold text-neutral-400 dark:text-zinc-500 uppercase flex items-center justify-between">
+                          <span>Znaki</span>
+                          {recordFilters.accidentals !== 'all' && (
+                            <button
+                              type="button"
+                              onClick={() => setRecordFilters(prev => ({ ...prev, accidentals: 'all' }))}
+                              className="text-amber-500 hover:underline lowercase font-semibold cursor-pointer"
+                            >
+                              reset
+                            </button>
+                          )}
+                        </div>
+                        <select
+                          value={recordFilters.accidentals}
+                          onChange={(e) => setRecordFilters(prev => ({ ...prev, accidentals: e.target.value }))}
+                          className={`w-full text-xs px-2 py-1.5 rounded-lg border outline-none focus:ring-1 focus:ring-amber-500 transition-colors ${
+                            recordFilters.accidentals !== 'all'
+                              ? 'border-amber-500/60 bg-amber-500/10 text-amber-600 dark:text-amber-300 font-bold'
+                              : (isDarkMode ? 'bg-zinc-800/90 border-zinc-700 text-zinc-200' : 'bg-white border-neutral-300 text-neutral-800')
+                          }`}
+                        >
+                          <option value="all">Wszystkie</option>
+                          <option value="acc">
+                            WŁ (ze znakami) ({allValidRecords.filter(([recKey]) => parseConfigKey(recKey)?.rawAccidentals === 1).length})
+                          </option>
+                          <option value="noacc">
+                            WYŁ (bez znaków) ({allValidRecords.filter(([recKey]) => parseConfigKey(recKey)?.rawAccidentals === 0).length})
+                          </option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Training with Selected Records Bar */}
               {(Object.entries(highScores) as [string, number][]).filter(([_, scoreVal]) => scoreVal > 0).length > 0 && (
                 <div className={`px-4 py-3 border-b text-xs flex flex-col gap-2.5 ${
@@ -3307,7 +3712,7 @@ const getPitchClass = (p: string): number | null => {
                         title={
                           selectedRecordKeysForTraining.filter(k => (highScores[k] || 0) > 0).length === 0
                             ? 'Zaznacz przynajmniej jeden rekord z listy poniżej'
-                            : 'Rozpocznij grę z rotacją co 4 takty po zaznaczonych rekordach'
+                            : 'Przygotuj ćwiczenie z rotacją po zaznaczonych rekordach (rozpoczęcie po naciśnięciu Start)'
                         }
                       >
                         <Play size={13} fill="currentColor" />
@@ -3320,23 +3725,23 @@ const getPitchClass = (p: string): number | null => {
 
                   {/* Selection helpers: Select all, Deselect, Counter */}
                   <div className="flex items-center justify-between gap-2 text-[11px] pt-1 border-t border-zinc-800/40">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <button
-                        onClick={selectAllRecordsForTraining}
+                        onClick={activeFiltersCount > 0 ? selectFilteredRecordsForTraining : selectAllRecordsForTraining}
                         className="text-amber-500 hover:underline font-semibold cursor-pointer"
                       >
-                        Zaznacz wszystkie
+                        {activeFiltersCount > 0 ? `Zaznacz widoczne (${filteredRecords.length})` : 'Zaznacz wszystkie'}
                       </button>
                       <span className="text-zinc-500">•</span>
                       <button
-                        onClick={deselectAllRecordsForTraining}
+                        onClick={activeFiltersCount > 0 ? deselectFilteredRecordsForTraining : deselectAllRecordsForTraining}
                         className="text-zinc-400 hover:underline font-medium cursor-pointer"
                       >
-                        Odznacz wszystkie
+                        {activeFiltersCount > 0 ? 'Odznacz widoczne' : 'Odznacz wszystkie'}
                       </button>
                     </div>
-                    <span className="text-zinc-400 font-mono text-[11px]">
-                      Wybrano: <strong className="text-amber-400 font-bold">{selectedRecordKeysForTraining.filter(k => (highScores[k] || 0) > 0).length}</strong> z {(Object.entries(highScores) as [string, number][]).filter(([_, scoreVal]) => scoreVal > 0).length}
+                    <span className="text-zinc-400 font-mono text-[11px] shrink-0">
+                      Wybrano: <strong className="text-amber-400 font-bold">{selectedRecordKeysForTraining.filter(k => (highScores[k] || 0) > 0).length}</strong> z {allValidRecords.length}
                     </span>
                   </div>
                 </div>
@@ -3344,7 +3749,7 @@ const getPitchClass = (p: string): number | null => {
 
               {/* List of records */}
               <div className="p-3 sm:p-4 overflow-y-auto flex-1 custom-scrollbar space-y-1.5">
-                {(Object.entries(highScores) as [string, number][]).filter(([_, scoreVal]) => scoreVal > 0).length === 0 ? (
+                {allValidRecords.length === 0 ? (
                   <div className="text-center py-10 flex flex-col items-center justify-center gap-2">
                     <Trophy className={`w-8 h-8 ${isDarkMode ? 'text-zinc-700' : 'text-neutral-300'}`} />
                     <p className={`text-sm ${isDarkMode ? 'text-zinc-400' : 'text-neutral-500'}`}>
@@ -3354,14 +3759,26 @@ const getPitchClass = (p: string): number | null => {
                       Graj z włączonym śledzeniem tempa, aby automatycznie ustanawiać rekordy prędkości dla poszczególnych tonacji i opcji.
                     </p>
                   </div>
+                ) : filteredRecords.length === 0 ? (
+                  <div className="text-center py-10 flex flex-col items-center justify-center gap-2">
+                    <FilterX className="w-8 h-8 text-amber-500/70" />
+                    <p className={`text-sm font-bold ${isDarkMode ? 'text-zinc-200' : 'text-neutral-800'}`}>
+                      Brak rekordów spełniających wybrane filtry
+                    </p>
+                    <p className={`text-xs ${isDarkMode ? 'text-zinc-400' : 'text-neutral-500'} max-w-xs`}>
+                      Zmień ustawienia filtrów powyżej lub kliknij przycisk poniżej, aby zresetować filtrowanie.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={resetRecordFilters}
+                      className="mt-2 px-3 py-1.5 text-xs font-bold rounded-xl bg-amber-500 hover:bg-amber-400 text-black transition-colors cursor-pointer"
+                    >
+                      Wyczyść filtry ({activeFiltersCount})
+                    </button>
+                  </div>
                 ) : (
-                  (Object.entries(highScores) as [string, number][])
-                    .filter(([_, scoreVal]) => scoreVal > 0)
-                    .sort(([keyA, scoreA], [keyB, scoreB]) =>
-                      compareParsedRecords(keyA, scoreA, keyB, scoreB, sortRules)
-                    )
-                    .map(([key, scoreVal], idx) => {
-                      const parsed = parseConfigKey(key);
+                  filteredRecords.map(([key, scoreVal], idx) => {
+                    const parsed = parseConfigKey(key);
                       const isCurrentConfig = key === configKey;
                       const isBeatenInSession = sessionBeatenKeys.has(key);
                       const isSelectedForTraining = selectedRecordKeysForTraining.includes(key);
@@ -4150,6 +4567,55 @@ const getPitchClass = (p: string): number | null => {
                   className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-all shadow-md cursor-pointer"
                 >
                   Zamknij
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Practice Mode Locked Dialog */}
+        {showPracticeModeLockDialog && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 15 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 15 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+              className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border text-center flex flex-col items-center gap-4 ${
+                isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-100 shadow-black/80' : 'bg-white border-neutral-200 text-neutral-900 shadow-neutral-300'
+              }`}
+            >
+              <div className="w-12 h-12 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center shrink-0">
+                <Target size={26} className="animate-pulse" />
+              </div>
+
+              <div>
+                <h3 className="text-base sm:text-lg font-black tracking-tight mb-2">
+                  Tryb ćwiczeń wybranych rekordów jest aktywny
+                </h3>
+                <p className={`text-xs sm:text-sm leading-relaxed ${isDarkMode ? 'text-zinc-400' : 'text-neutral-600'}`}>
+                  Aktualnie trwa ćwiczenie wybranych rekordów (parametry losują się automatycznie co 4 takty z wybranej puli).
+                  <br /><br />
+                  Aby ręcznie zmienić parametry (tonację, znaki przygodne, linie dodane lub ilość nut), musisz najpierw <strong>wyłączyć tryb ćwiczeń wybranych rekordów</strong>.
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full pt-2">
+                <button
+                  type="button"
+                  onClick={handleDisablePracticeFromRecords}
+                  className="w-full sm:flex-1 py-2.5 px-4 rounded-xl text-xs font-black bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white shadow-lg shadow-red-600/20 transition-all cursor-pointer active:scale-95"
+                >
+                  Wyłącz tryb ćwiczeń
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPracticeModeLockDialog(false)}
+                  className={`w-full sm:flex-1 py-2.5 px-4 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
+                    isDarkMode ? 'border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-300' : 'border-neutral-300 bg-neutral-100 hover:bg-neutral-200 text-neutral-700'
+                  }`}
+                >
+                  Zostaw włączony
                 </button>
               </div>
             </motion.div>
