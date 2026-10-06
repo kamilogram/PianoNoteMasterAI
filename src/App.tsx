@@ -680,7 +680,7 @@ export default function App() {
     { field: 'ledger', order: 'desc' }
   ]);
   const [showAdvancedSortPanel, setShowAdvancedSortPanel] = useState(false);
-  const [showFilterPanel, setShowFilterPanel] = useState(true);
+  const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [recordFilters, setRecordFilters] = useState<{
     keySignature: string;
     notes: string;
@@ -3296,74 +3296,131 @@ const getPitchClass = (p: string): number | null => {
                 </button>
               </div>
 
-              {/* Advanced Multi-Criteria Sort Control Bar */}
+              {/* Collapsible View Controls Bar: Sort & Filter */}
               {(Object.entries(highScores) as [string, number][]).filter(([_, scoreVal]) => scoreVal > 0).length > 0 && (
-                <div className={`px-4 py-2.5 border-b text-xs flex flex-col gap-2 ${
+                <div className={`px-3 py-2 border-b text-xs flex flex-col gap-2 ${
                   isDarkMode ? 'border-zinc-800 bg-zinc-950/40' : 'border-neutral-100 bg-neutral-50/70'
                 }`}>
-                  <div className="flex items-center justify-between flex-wrap gap-2">
-                    <button
-                      onClick={() => setShowAdvancedSortPanel(prev => !prev)}
-                      className="flex items-center gap-1.5 font-bold text-neutral-800 dark:text-zinc-200 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
-                    >
-                      <SlidersHorizontal size={14} className="text-amber-500" />
-                      <span>Zaawansowane sortowanie ({sortRules.length} {sortRules.length === 1 ? 'warunek' : (sortRules.length < 5 ? 'warunki' : 'warunków')})</span>
-                      {showAdvancedSortPanel ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                    </button>
+                  {/* Buttons Row - strictly compact */}
+                  <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {/* Sort toggle button */}
+                      <button
+                        type="button"
+                        onClick={() => setShowAdvancedSortPanel(prev => !prev)}
+                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-bold transition-all cursor-pointer shadow-2xs ${
+                          showAdvancedSortPanel
+                            ? 'bg-amber-500/20 border-amber-500 text-amber-500 dark:text-amber-400 ring-1 ring-amber-500/30'
+                            : (isDarkMode ? 'bg-zinc-800/90 border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-800' : 'bg-white border-neutral-200 text-neutral-700 hover:text-neutral-900')
+                        }`}
+                        title="Kliknij, aby rozwinąć panel sortowania"
+                      >
+                        <SlidersHorizontal size={13} className="text-amber-500 shrink-0" />
+                        <span>Sortowanie</span>
+                        {showAdvancedSortPanel ? <ChevronUp size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
+                      </button>
 
-                    <div className="flex items-center gap-1 text-[11px] flex-wrap">
-                      <span className="text-neutral-400 dark:text-zinc-500 mr-1 hidden sm:inline">Presety:</span>
+                      {/* Filter toggle button */}
                       <button
-                        onClick={() => setSortRules([{ field: 'score', order: 'desc' }])}
-                        className={`px-2 py-0.5 rounded-md font-medium transition-all border ${
-                          sortRules.length === 1 && sortRules[0].field === 'score' && sortRules[0].order === 'desc'
-                            ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/40 font-bold'
-                            : (isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200' : 'bg-white border-neutral-200 text-neutral-600 hover:text-neutral-900')
+                        type="button"
+                        onClick={() => setShowFilterPanel(prev => !prev)}
+                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-bold transition-all cursor-pointer shadow-2xs ${
+                          showFilterPanel || activeFiltersCount > 0
+                            ? 'bg-amber-500/20 border-amber-500 text-amber-500 dark:text-amber-400 ring-1 ring-amber-500/30'
+                            : (isDarkMode ? 'bg-zinc-800/90 border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-800' : 'bg-white border-neutral-200 text-neutral-700 hover:text-neutral-900')
                         }`}
-                        title="Sortuj tylko po prędkości NPM (malejąco)"
+                        title="Kliknij, aby rozwinąć panel filtrowania po parametrach"
                       >
-                        ⚡ Prędkość
+                        <Filter size={13} className={activeFiltersCount > 0 ? 'text-amber-500 animate-pulse shrink-0' : 'text-zinc-400 shrink-0'} />
+                        <span>Filtrowanie</span>
+                        {activeFiltersCount > 0 && (
+                          <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-amber-400 text-black leading-none">
+                            {activeFiltersCount}
+                          </span>
+                        )}
+                        {showFilterPanel ? <ChevronUp size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
                       </button>
-                      <button
-                        onClick={() => setSortRules([
-                          { field: 'notes', order: 'desc' },
-                          { field: 'ledger', order: 'desc' },
-                          { field: 'score', order: 'desc' }
-                        ])}
-                        className={`px-2 py-0.5 rounded-md font-medium transition-all border ${
-                          sortRules.length === 3 && sortRules[0].field === 'notes' && sortRules[1].field === 'ledger'
-                            ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/40 font-bold'
-                            : (isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200' : 'bg-white border-neutral-200 text-neutral-600 hover:text-neutral-900')
-                        }`}
-                        title="Sortuj wg trudności: najpierw ilość nut, potem linie dodane, potem prędkość"
-                      >
-                        🎼 Trudność
-                      </button>
-                      <button
-                        onClick={() => setSortRules([
-                          { field: 'accCount', order: 'desc' },
-                          { field: 'keyName', order: 'asc' },
-                          { field: 'score', order: 'desc' }
-                        ])}
-                        className={`px-2 py-0.5 rounded-md font-medium transition-all border ${
-                          sortRules.length === 3 && sortRules[0].field === 'accCount'
-                            ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/40 font-bold'
-                            : (isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200' : 'bg-white border-neutral-200 text-neutral-600 hover:text-neutral-900')
-                        }`}
-                        title="Sortuj po ilości znaków przykluczowych, nazwie tonacji i prędkości"
-                      >
-                        🎵 Tonacja
-                      </button>
+                    </div>
+
+                    {/* Counter & Clear filter */}
+                    <div className="flex items-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400 ml-auto">
+                      <span>
+                        Widoczne: <strong className="text-amber-500 font-bold">{filteredRecords.length}</strong> z {allValidRecords.length}
+                      </span>
+                      {activeFiltersCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={resetRecordFilters}
+                          className="flex items-center gap-0.5 text-rose-500 hover:underline font-bold cursor-pointer"
+                          title="Wyczyść wszystkie aktywne filtry"
+                        >
+                          <FilterX size={12} />
+                          <span>Reset</span>
+                        </button>
+                      )}
                     </div>
                   </div>
 
-                  {/* Expandable Multi-Level Sort Rules Builder */}
+                  {/* Expandable Sort Panel */}
                   {showAdvancedSortPanel && (
-                    <div className={`mt-2 p-3 rounded-xl border flex flex-col gap-2.5 animate-in fade-in slide-in-from-top-1 duration-200 ${
+                    <div className={`p-3 rounded-xl border flex flex-col gap-2.5 animate-in fade-in slide-in-from-top-1 duration-150 ${
                       isDarkMode ? 'bg-zinc-950/90 border-zinc-800' : 'bg-white border-neutral-200 shadow-xs'
                     }`}>
+                      {/* Presets */}
+                      <div className="flex items-center justify-between flex-wrap gap-1.5 pb-2 border-b border-zinc-800/40">
+                        <span className="text-[10px] font-bold text-neutral-400 dark:text-zinc-500 uppercase">
+                          Szybkie presety:
+                        </span>
+                        <div className="flex items-center gap-1 text-[11px] flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => setSortRules([{ field: 'score', order: 'desc' }])}
+                            className={`px-2 py-0.5 rounded-md font-medium transition-all border cursor-pointer ${
+                              sortRules.length === 1 && sortRules[0].field === 'score' && sortRules[0].order === 'desc'
+                                ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/40 font-bold'
+                                : (isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200' : 'bg-white border-neutral-200 text-neutral-600 hover:text-neutral-900')
+                            }`}
+                            title="Sortuj tylko po prędkości NPM (malejąco)"
+                          >
+                            ⚡ Prędkość
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSortRules([
+                              { field: 'notes', order: 'desc' },
+                              { field: 'ledger', order: 'desc' },
+                              { field: 'score', order: 'desc' }
+                            ])}
+                            className={`px-2 py-0.5 rounded-md font-medium transition-all border cursor-pointer ${
+                              sortRules.length === 3 && sortRules[0].field === 'notes' && sortRules[1].field === 'ledger'
+                                ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/40 font-bold'
+                                : (isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200' : 'bg-white border-neutral-200 text-neutral-600 hover:text-neutral-900')
+                            }`}
+                            title="Sortuj wg trudności: ilość nut, linie, prędkość"
+                          >
+                            🎼 Trudność
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSortRules([
+                              { field: 'accCount', order: 'desc' },
+                              { field: 'keyName', order: 'asc' },
+                              { field: 'score', order: 'desc' }
+                            ])}
+                            className={`px-2 py-0.5 rounded-md font-medium transition-all border cursor-pointer ${
+                              sortRules.length === 3 && sortRules[0].field === 'accCount'
+                                ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/40 font-bold'
+                                : (isDarkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200' : 'bg-white border-neutral-200 text-neutral-600 hover:text-neutral-900')
+                            }`}
+                            title="Sortuj po ilości znaków przykluczowych, nazwie tonacji i prędkości"
+                          >
+                            🎵 Tonacja
+                          </button>
+                        </div>
+                      </div>
+
                       <div className="text-[10px] font-bold text-neutral-400 dark:text-zinc-500 uppercase tracking-wider">
-                        Kolejność kryteriów (priorytet od góry do dołu):
+                        Kolejność kryteriów sortowania (priorytet od góry do dołu):
                       </div>
 
                       {sortRules.map((rule, index) => {
@@ -3373,11 +3430,10 @@ const getPitchClass = (p: string): number | null => {
 
                         return (
                           <div key={index} className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-                            <span className="text-[11px] font-bold text-amber-500 shrink-0 w-10">
+                            <span className="text-[11px] font-bold text-amber-500 shrink-0 w-8">
                               #{index + 1}.
                             </span>
 
-                            {/* Select field */}
                             <select
                               value={rule.field}
                               onChange={(e) => {
@@ -3395,7 +3451,6 @@ const getPitchClass = (p: string): number | null => {
                               ))}
                             </select>
 
-                            {/* Select direction */}
                             <select
                               value={rule.order}
                               onChange={(e) => {
@@ -3410,9 +3465,9 @@ const getPitchClass = (p: string): number | null => {
                               <option value="asc">Rosnąco ↑</option>
                             </select>
 
-                            {/* Move up/down buttons */}
                             <div className="flex items-center gap-0.5">
                               <button
+                                type="button"
                                 disabled={index === 0}
                                 onClick={() => {
                                   setSortRules(prev => {
@@ -3423,7 +3478,7 @@ const getPitchClass = (p: string): number | null => {
                                     return next;
                                   });
                                 }}
-                                className={`p-1.5 rounded-md transition-colors disabled:opacity-30 ${
+                                className={`p-1.5 rounded-md transition-colors disabled:opacity-30 cursor-pointer ${
                                   isDarkMode ? 'hover:bg-zinc-800 text-zinc-400' : 'hover:bg-neutral-100 text-neutral-600'
                                 }`}
                                 title="Przesuń priorytet wyżej"
@@ -3431,6 +3486,7 @@ const getPitchClass = (p: string): number | null => {
                                 <ChevronUp size={14} />
                               </button>
                               <button
+                                type="button"
                                 disabled={index === sortRules.length - 1}
                                 onClick={() => {
                                   setSortRules(prev => {
@@ -3441,7 +3497,7 @@ const getPitchClass = (p: string): number | null => {
                                     return next;
                                   });
                                 }}
-                                className={`p-1.5 rounded-md transition-colors disabled:opacity-30 ${
+                                className={`p-1.5 rounded-md transition-colors disabled:opacity-30 cursor-pointer ${
                                   isDarkMode ? 'hover:bg-zinc-800 text-zinc-400' : 'hover:bg-neutral-100 text-neutral-600'
                                 }`}
                                 title="Przesuń priorytet niżej"
@@ -3450,13 +3506,13 @@ const getPitchClass = (p: string): number | null => {
                               </button>
                             </div>
 
-                            {/* Delete rule button */}
                             {sortRules.length > 1 && (
                               <button
+                                type="button"
                                 onClick={() => {
                                   setSortRules(prev => prev.filter((_, idx) => idx !== index));
                                 }}
-                                className="p-1.5 rounded-md transition-colors text-red-500 hover:bg-red-500/10"
+                                className="p-1.5 rounded-md transition-colors text-red-500 hover:bg-red-500/10 cursor-pointer"
                                 title="Usuń ten warunek"
                               >
                                 <X size={14} />
@@ -3468,6 +3524,7 @@ const getPitchClass = (p: string): number | null => {
 
                       {sortRules.length < 6 && (
                         <button
+                          type="button"
                           onClick={() => {
                             const used = new Set(sortRules.map(r => r.field));
                             const available: SortField[] = ['score', 'notes', 'ledger', 'accCount', 'keyName', 'useAccidentals'];
@@ -3476,56 +3533,19 @@ const getPitchClass = (p: string): number | null => {
                               setSortRules(prev => [...prev, { field: nextUnused, order: 'desc' }]);
                             }
                           }}
-                          className="mt-1 self-start flex items-center gap-1 text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline"
+                          className="mt-1 self-start flex items-center gap-1 text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer"
                         >
                           <Plus size={14} /> Dodaj kolejny warunek sortowania
                         </button>
                       )}
                     </div>
                   )}
-                </div>
-              )}
 
-              {/* Filter Parameters Control Bar */}
-              {(Object.entries(highScores) as [string, number][]).filter(([_, scoreVal]) => scoreVal > 0).length > 0 && (
-                <div className={`px-4 py-2.5 border-b text-xs flex flex-col gap-2 ${
-                  isDarkMode ? 'border-zinc-800 bg-zinc-950/60' : 'border-neutral-100 bg-neutral-50/50'
-                }`}>
-                  <div className="flex items-center justify-between flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowFilterPanel(prev => !prev)}
-                      className="flex items-center gap-1.5 font-bold text-neutral-800 dark:text-zinc-200 hover:text-amber-600 dark:hover:text-amber-400 transition-colors cursor-pointer"
-                    >
-                      <Filter size={14} className={activeFiltersCount > 0 ? 'text-amber-500 animate-pulse' : 'text-zinc-400'} />
-                      <span>Filtruj parametry</span>
-                      {activeFiltersCount > 0 && (
-                        <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-amber-400 text-black leading-none">
-                          {activeFiltersCount} {activeFiltersCount === 1 ? 'aktywny' : 'aktywne'}
-                        </span>
-                      )}
-                      <span className="text-[11px] font-normal text-zinc-500 dark:text-zinc-400">
-                        (widoczne: <strong className="font-bold text-amber-500">{filteredRecords.length}</strong> z {allValidRecords.length})
-                      </span>
-                      {showFilterPanel ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                    </button>
-
-                    {activeFiltersCount > 0 && (
-                      <button
-                        type="button"
-                        onClick={resetRecordFilters}
-                        className="flex items-center gap-1 text-[11px] font-semibold text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 cursor-pointer"
-                        title="Zresetuj wszystkie filtry parametrów"
-                      >
-                        <FilterX size={13} />
-                        <span>Wyczyść filtry</span>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Filter Selectors Grid */}
+                  {/* Expandable Filter Panel */}
                   {showFilterPanel && (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 animate-in fade-in duration-150">
+                    <div className={`p-3 rounded-xl border grid grid-cols-2 sm:grid-cols-4 gap-2.5 animate-in fade-in slide-in-from-top-1 duration-150 ${
+                      isDarkMode ? 'bg-zinc-950/90 border-zinc-800' : 'bg-white border-neutral-200 shadow-xs'
+                    }`}>
                       {/* Key Signature Filter */}
                       <div className="flex flex-col gap-1">
                         <div className="text-[10px] font-bold text-neutral-400 dark:text-zinc-500 uppercase flex items-center justify-between">
@@ -3546,7 +3566,7 @@ const getPitchClass = (p: string): number | null => {
                           className={`w-full text-xs px-2 py-1.5 rounded-lg border outline-none focus:ring-1 focus:ring-amber-500 transition-colors ${
                             recordFilters.keySignature !== 'all'
                               ? 'border-amber-500/60 bg-amber-500/10 text-amber-600 dark:text-amber-300 font-bold'
-                              : (isDarkMode ? 'bg-zinc-800/90 border-zinc-700 text-zinc-200' : 'bg-white border-neutral-300 text-neutral-800')
+                              : (isDarkMode ? 'bg-zinc-800/90 border-zinc-700 text-zinc-200' : 'bg-neutral-50 border-neutral-300 text-neutral-800')
                           }`}
                         >
                           <option value="all">Wszystkie ({allValidRecords.length})</option>
@@ -3578,7 +3598,7 @@ const getPitchClass = (p: string): number | null => {
                           className={`w-full text-xs px-2 py-1.5 rounded-lg border outline-none focus:ring-1 focus:ring-amber-500 transition-colors ${
                             recordFilters.notes !== 'all'
                               ? 'border-amber-500/60 bg-amber-500/10 text-amber-600 dark:text-amber-300 font-bold'
-                              : (isDarkMode ? 'bg-zinc-800/90 border-zinc-700 text-zinc-200' : 'bg-white border-neutral-300 text-neutral-800')
+                              : (isDarkMode ? 'bg-zinc-800/90 border-zinc-700 text-zinc-200' : 'bg-neutral-50 border-neutral-300 text-neutral-800')
                           }`}
                         >
                           <option value="all">Wszystkie (1-5)</option>
@@ -3613,7 +3633,7 @@ const getPitchClass = (p: string): number | null => {
                           className={`w-full text-xs px-2 py-1.5 rounded-lg border outline-none focus:ring-1 focus:ring-amber-500 transition-colors ${
                             recordFilters.ledger !== 'all'
                               ? 'border-amber-500/60 bg-amber-500/10 text-amber-600 dark:text-amber-300 font-bold'
-                              : (isDarkMode ? 'bg-zinc-800/90 border-zinc-700 text-zinc-200' : 'bg-white border-neutral-300 text-neutral-800')
+                              : (isDarkMode ? 'bg-zinc-800/90 border-zinc-700 text-zinc-200' : 'bg-neutral-50 border-neutral-300 text-neutral-800')
                           }`}
                         >
                           <option value="all">Wszystkie (1-5)</option>
@@ -3648,7 +3668,7 @@ const getPitchClass = (p: string): number | null => {
                           className={`w-full text-xs px-2 py-1.5 rounded-lg border outline-none focus:ring-1 focus:ring-amber-500 transition-colors ${
                             recordFilters.accidentals !== 'all'
                               ? 'border-amber-500/60 bg-amber-500/10 text-amber-600 dark:text-amber-300 font-bold'
-                              : (isDarkMode ? 'bg-zinc-800/90 border-zinc-700 text-zinc-200' : 'bg-white border-neutral-300 text-neutral-800')
+                              : (isDarkMode ? 'bg-zinc-800/90 border-zinc-700 text-zinc-200' : 'bg-neutral-50 border-neutral-300 text-neutral-800')
                           }`}
                         >
                           <option value="all">Wszystkie</option>
