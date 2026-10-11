@@ -250,13 +250,32 @@ const pitchToMidi = (p: string): number => {
   return (oct + 1) * 12 + (semitones[note] ?? 0);
 };
 
-const getNotePool = (clef: 'treble' | 'bass', ledgerLines: number | string) => {
+const getNotePool = (clef: 'treble' | 'bass', ledgerLines: number | string, keySignature?: string) => {
   const opt = getLedgerOption(ledgerLines);
-  if (clef === 'treble') {
-    return generateRange(opt.minTreble, opt.maxTreble);
-  } else {
-    return generateRange(opt.minBass, opt.maxBass);
+  const rawPool = clef === 'treble'
+    ? generateRange(opt.minTreble, opt.maxTreble)
+    : generateRange(opt.minBass, opt.maxBass);
+
+  if (!keySignature || !KEY_SIGNATURES[keySignature as keyof typeof KEY_SIGNATURES]) {
+    return rawPool;
   }
+
+  const sig = KEY_SIGNATURES[keySignature as keyof typeof KEY_SIGNATURES];
+  const isKeyboardRange = String(ledgerLines).startsWith('kb');
+  const isLowestC2 = opt.minBass === 'C2' || isKeyboardRange;
+  const isHighestC7 = opt.maxTreble === 'C7' || isKeyboardRange;
+
+  return rawPool.filter(pitch => {
+    // Jeśli najniższy klawisz/nuta to C2, nie może być wylosowana nuta C2 w tonacji, w której C zmienia się na B (bemol / C♭, np. Gb Major)
+    if (isLowestC2 && pitch === 'C2' && sig.flats.includes('C')) {
+      return false;
+    }
+    // Jeśli najwyższy klawisz/nuta to C7, nie może być wylosowana nuta C7 w tonacji, w której C zmienia się na Cis (C#, np. D, A, E, B, F# Major)
+    if (isHighestC7 && pitch === 'C7' && sig.sharps.includes('C')) {
+      return false;
+    }
+    return true;
+  });
 };
 
 const generateRange = (start: string, end: string) => {
@@ -743,24 +762,29 @@ export default function App() {
     correctHitsRef.current = correctHits;
   }, [startDateTime, score, activeDurationMs, isPlaying, correctHits]);
 
-  // Screen Wake Lock API to prevent screen dimming/sleeping when mic is active or session is playing
+  // Screen Wake Lock API to prevent screen dimming/sleeping when listening mode (mic/MIDI) or playing session is active
   useEffect(() => {
     let wakeLockSentinel: any = null;
+    const shouldKeepAwake = audioInputStatus.isMicActive || audioInputStatus.isMidiConnected || isPlaying;
 
     const requestWakeLock = async () => {
-      if ('wakeLock' in navigator && (audioInputStatus.isMicActive || isPlaying)) {
+      if ('wakeLock' in navigator && shouldKeepAwake) {
         try {
-          wakeLockSentinel = await (navigator as any).wakeLock.request('screen');
+          if (!wakeLockSentinel || wakeLockSentinel.released) {
+            wakeLockSentinel = await (navigator as any).wakeLock.request('screen');
+          }
         } catch (err) {
           // Ignore error if wake lock fails or is unsupported/rejected
         }
       }
     };
 
-    requestWakeLock();
+    if (shouldKeepAwake) {
+      requestWakeLock();
+    }
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && (audioInputStatus.isMicActive || isPlaying)) {
+      if (document.visibilityState === 'visible' && (audioInputStatus.isMicActive || audioInputStatus.isMidiConnected || isPlaying)) {
         requestWakeLock();
       }
     };
@@ -773,7 +797,7 @@ export default function App() {
         wakeLockSentinel.release().catch(() => {});
       }
     };
-  }, [audioInputStatus.isMicActive, isPlaying]);
+  }, [audioInputStatus.isMicActive, audioInputStatus.isMidiConnected, isPlaying]);
 
   useEffect(() => {
     const handleUnload = () => {
@@ -1353,7 +1377,7 @@ export default function App() {
     finishedKey: string, 
     finishedMaxNotes: number, 
     finishedUseAccidentals: boolean,
-    finishedLedgerLinesParam?: number
+    finishedLedgerLinesParam?: number | string
   ) => {
     const ledger = finishedLedgerLinesParam !== undefined ? finishedLedgerLinesParam : activeLedgerLinesRef.current;
     const finishedConfigKey = `${finishedKey}_${finishedMaxNotes}_${ledger}_${finishedUseAccidentals ? 'acc' : 'noacc'}`;
@@ -1930,7 +1954,7 @@ export default function App() {
         activeUseAccidentalsRef.current = nextAccidentals;
         setActiveUseAccidentals(nextAccidentals);
 
-        const nextConfigKey = `${nextKey}_${nextMaxNotes}_${ledgerLines}_${nextAccidentals ? 'acc' : 'noacc'}`;
+        const nextConfigKey = `${nextKey}_${nextMaxNotes}_${currentLedger}_${nextAccidentals ? 'acc' : 'noacc'}`;
         const currentScores = highScoresRef.current;
         const nextScore = currentScores[nextConfigKey] || 0;
         const rankVal = getRankForConfig(currentScores, nextConfigKey);
@@ -1956,6 +1980,10 @@ export default function App() {
     const beatXs = [300, 500, 700, 900];
     const measureAccidentals = new Map<string, string>(); // displayPitch -> 'sharp' | 'flat' | 'natural'
     const useAccidentalsForNotes = activeUseAccidentalsRef.current;
+    const ledgerOpt = getLedgerOption(currentLedger);
+    const isKeyboardRange = String(currentLedger).startsWith('kb');
+    const isLowestC2 = ledgerOpt.minBass === 'C2' || isKeyboardRange;
+    const isHighestC7 = ledgerOpt.maxTreble === 'C7' || isKeyboardRange;
 
     for (let beatIndex = 0; beatIndex < 4; beatIndex++) {
       const count = Math.floor(Math.random() * activeMaxNotesRef.current) + 1;
@@ -1974,12 +2002,13 @@ export default function App() {
             isTreble = true;
           }
         }
-        const pool = isTreble ? getNotePool('treble', ledgerLines) : getNotePool('bass', ledgerLines);
+        const pool = isTreble ? getNotePool('treble', currentLedger, currentKey) : getNotePool('bass', currentLedger, currentKey);
         
         let basePitch: string = pool[0];
         let attempts = 0;
 
         const checkValid = (p: string) => {
+          if (!pool.includes(p)) return false;
           if (usedNotesInBeat.some(n => n.pitch === p)) return false;
           const pNote = p.slice(0, -1);
           const pOctave = parseInt(p.slice(-1));
@@ -2017,7 +2046,7 @@ export default function App() {
         // 60% chance to repeat a note with an accidental from previously generated beats in this measure
         if (recurringNotesWithAccidentals.length > 0 && Math.random() < 0.6) {
           const candidatePitches = Array.from(new Set(recurringNotesWithAccidentals.map(n => n.displayPitch)));
-          const validCandidates = candidatePitches.filter(p => checkValid(p));
+          const validCandidates = candidatePitches.filter(p => pool.includes(p) && checkValid(p));
           if (validCandidates.length > 0) {
             basePitch = validCandidates[Math.floor(Math.random() * validCandidates.length)];
             chosenFromRecurring = true;
@@ -2085,10 +2114,16 @@ export default function App() {
               
               const validOptions: ('sharp' | 'flat' | 'natural')[] = [];
               if (canHaveSharp && isAccidentalAllowed(noteName, 'sharp', currentKey)) {
-                validOptions.push('sharp');
+                // Dla klawisza C7 w trybie keyboardu znak podwyższający nie może wystąpić (dałby C#7 powyżej C7)
+                if (!(basePitch === 'C7' && (isHighestC7 || isKeyboardRange))) {
+                  validOptions.push('sharp');
+                }
               }
               if (canHaveFlat && isAccidentalAllowed(noteName, 'flat', currentKey)) {
-                validOptions.push('flat');
+                // Dla klawisza C2 w trybie keyboardu znak obniżający nie może wystąpić (dałby C♭2/B1 poniżej C2)
+                if (!(basePitch === 'C2' && (isLowestC2 || isKeyboardRange))) {
+                  validOptions.push('flat');
+                }
               }
               if (isAccidentalAllowed(noteName, 'natural', currentKey)) {
                 validOptions.push('natural');
@@ -2101,6 +2136,14 @@ export default function App() {
               }
             }
           }
+        }
+
+        // Zabezpieczenie przed przekroczeniem zakresu keyboardu C2–C7 przy powtórzonych znakach w takcie
+        if (basePitch === 'C2' && (isLowestC2 || isKeyboardRange) && targetMod === 'flat') {
+          targetMod = 'natural';
+        }
+        if (basePitch === 'C7' && (isHighestC7 || isKeyboardRange) && targetMod === 'sharp') {
+          targetMod = 'natural';
         }
 
         if (targetMod === 'sharp') {
@@ -2121,12 +2164,16 @@ export default function App() {
           measureAccidentals.set(accidentalKey, targetMod);
         }
 
-        const isKeyboardRange = String(currentLedger).startsWith('kb');
         if (isKeyboardRange) {
           const midiVal = pitchToMidi(finalActualPitch);
-          if (midiVal < 36 || midiVal > 96) {
-            finalActualPitch = basePitch;
-            accidental = null;
+          if (midiVal < 36) {
+            finalActualPitch = 'C2';
+            targetMod = 'natural';
+            accidental = sigState === 'flat' ? '♮' : null;
+          } else if (midiVal > 96) {
+            finalActualPitch = 'C7';
+            targetMod = 'natural';
+            accidental = sigState === 'sharp' ? '♮' : null;
           }
         }
 
