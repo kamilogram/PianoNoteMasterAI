@@ -27,18 +27,18 @@ interface StaffProps {
 
 // Scaling constants
 const DEFAULT_LINE_SPACING = 24; 
-const DEFAULT_STAFF_PADDING = 130;
+const DEFAULT_STAFF_PADDING = 150;
 const DEFAULT_CLEF_X = 20;
 const DEFAULT_SIG_START_X = 100;
 const DEFAULT_SIG_STEP_X = 24;
 const DEFAULT_BASS_OFFSET = 310;
 
 const COMPACT_LINE_SPACING = 16;
-const COMPACT_STAFF_PADDING = 70;
+const COMPACT_STAFF_PADDING = 90;
 const COMPACT_CLEF_X = 15;
 const COMPACT_SIG_START_X = 70;
 const COMPACT_SIG_STEP_X = 16;
-const COMPACT_BASS_OFFSET = 190;
+const COMPACT_BASS_OFFSET = 185;
 
 // Map note names to vertical positions on the staff
 const getNoteY = (pitch: string, clef: 'treble' | 'bass', padding: number, spacing: number): number => {
@@ -107,7 +107,7 @@ export const Staff: React.FC<StaffProps> = React.memo(({
   const SIG_START_X = isCompact ? COMPACT_SIG_START_X : DEFAULT_SIG_START_X;
   const SIG_STEP_X = isCompact ? COMPACT_SIG_STEP_X : DEFAULT_SIG_STEP_X;
   const BASS_OFFSET = isCompact ? COMPACT_BASS_OFFSET : DEFAULT_BASS_OFFSET;
-  const canvasHeight = isCompact ? 420 : 670;
+  const canvasHeight = isCompact ? 430 : 690;
 
   // Colors based on dark mode
   const lineStrokeColor = isDarkMode ? 'rgba(255, 255, 255, 0.25)' : '#333333';
@@ -288,14 +288,24 @@ export const Staff: React.FC<StaffProps> = React.memo(({
       const yBase = note.clef === 'treble' ? 0 : BASS_OFFSET;
       const y = yBase + getNoteY(note.displayPitch, note.clef, STAFF_PADDING, LINE_SPACING);
 
-      // Stem
+      // Stem (notes on middle line and above point down into staff, below middle line point up into staff)
+      const staffMidLine = yBase + STAFF_PADDING + 2 * LINE_SPACING;
+      const isStemDown = y <= staffMidLine;
+
       ctx.strokeStyle = isGreen ? hitGreenColor : primaryNoteColor;
       ctx.lineWidth = isCompact ? 1.2 : 1.8;
       ctx.beginPath();
-      const stemXOffset = isCompact ? 8 : 12;
       const stemHeight = isCompact ? 35 : 52;
-      ctx.moveTo(note.x + stemXOffset, y);
-      ctx.lineTo(note.x + stemXOffset, y - stemHeight);
+
+      if (isStemDown) {
+        const stemXOffset = isCompact ? -7 : -11;
+        ctx.moveTo(note.x + stemXOffset, y);
+        ctx.lineTo(note.x + stemXOffset, y + stemHeight);
+      } else {
+        const stemXOffset = isCompact ? 7 : 11;
+        ctx.moveTo(note.x + stemXOffset, y);
+        ctx.lineTo(note.x + stemXOffset, y - stemHeight);
+      }
       ctx.stroke();
 
       // Ledger lines
@@ -369,19 +379,19 @@ export const Staff: React.FC<StaffProps> = React.memo(({
   }, [notes, currentBeat, isCompact, keySignature, LINE_SPACING, STEP_SPACING, STAFF_PADDING, BASS_OFFSET, isDarkMode, isListeningMode, maxNotes]);
 
   return (
-    <div className={`w-full md:h-full flex items-center justify-center transition-colors duration-500 rounded-xl shadow-inner overflow-hidden border relative ${isCompact ? 'aspect-[1000/420]' : 'aspect-[1000/670]'} md:aspect-auto ${isDarkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-neutral-200'}`}>
+    <div className={`w-full md:h-full flex items-center justify-center transition-colors duration-500 rounded-xl shadow-inner overflow-hidden border relative ${isCompact ? 'aspect-[1000/430]' : 'aspect-[1000/690]'} md:aspect-auto ${isDarkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-neutral-200'}`}>
       <canvas
         ref={bgCanvasRef}
         width={1000}
         height={canvasHeight}
-        className="absolute inset-0 w-full h-full max-w-[1000px] max-h-[670px] m-auto object-contain pointer-events-none"
+        className="absolute inset-0 w-full h-full max-w-[1000px] max-h-[690px] m-auto object-contain pointer-events-none"
       />
       {children}
       <canvas
         ref={fgCanvasRef}
         width={1000}
         height={canvasHeight}
-        className="absolute inset-0 w-full h-full max-w-[1000px] max-h-[670px] m-auto object-contain pointer-events-none z-10"
+        className="absolute inset-0 w-full h-full max-w-[1000px] max-h-[690px] m-auto object-contain pointer-events-none z-10"
       />
     </div>
   );

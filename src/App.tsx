@@ -52,40 +52,210 @@ const KEY_SIGNATURES = {
 const NOTE_NAMES = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 const CHROMATIC_NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
-const ALL_CALIBRATION_PITCHES = Array.from({ length: 6 }, (_, i) => i + 1).flatMap(octave =>
+const ALL_CALIBRATION_PITCHES = Array.from({ length: 7 }, (_, i) => i + 1).flatMap(octave =>
   CHROMATIC_NOTE_NAMES.map(note => `${note}${octave}`)
 );
 
-const getNotePool = (clef: 'treble' | 'bass', ledgerLines: number) => {
-  const pool: string[] = [];
-  
+export interface LedgerOption {
+  id: string;
+  name: string;
+  compactName: string;
+  badgeLabel: string;
+  group: 'standard' | 'keyboard';
+  linesBetween: number;
+  minTreble: string;
+  maxTreble: string;
+  minBass: string;
+  maxBass: string;
+  sortWeight: number;
+  description: string;
+}
+
+export const ALL_LEDGER_OPTIONS: LedgerOption[] = [
+  // Standardowe symetryczne (1–5 kresek)
+  {
+    id: '1',
+    name: '1 linia (standard)',
+    compactName: '1L',
+    badgeLabel: '1 linia',
+    group: 'standard',
+    linesBetween: 1,
+    minTreble: 'C4',
+    maxTreble: 'A5',
+    minBass: 'E2',
+    maxBass: 'C4',
+    sortWeight: 1,
+    description: 'Symetrycznie 1 linia poza pięciolinią (C4–A5 w wiolinowym, E2–C4 w basowym)'
+  },
+  {
+    id: '2',
+    name: '2 linie (standard)',
+    compactName: '2L',
+    badgeLabel: '2 linie',
+    group: 'standard',
+    linesBetween: 2,
+    minTreble: 'A3',
+    maxTreble: 'C6',
+    minBass: 'C2',
+    maxBass: 'E4',
+    sortWeight: 2,
+    description: 'Symetrycznie 2 linie poza pięciolinią (A3–C6 w wiolinowym, C2–E4 w basowym)'
+  },
+  {
+    id: '3',
+    name: '3 linie (standard)',
+    compactName: '3L',
+    badgeLabel: '3 linie',
+    group: 'standard',
+    linesBetween: 3,
+    minTreble: 'F3',
+    maxTreble: 'E6',
+    minBass: 'A1',
+    maxBass: 'G4',
+    sortWeight: 3,
+    description: 'Symetrycznie 3 linie poza pięciolinią (F3–E6 w wiolinowym, A1–G4 w basowym)'
+  },
+  {
+    id: '4',
+    name: '4 linie (standard)',
+    compactName: '4L',
+    badgeLabel: '4 linie',
+    group: 'standard',
+    linesBetween: 4,
+    minTreble: 'D3',
+    maxTreble: 'G6',
+    minBass: 'F1',
+    maxBass: 'B4',
+    sortWeight: 4,
+    description: 'Symetrycznie 4 linie poza pięciolinią (D3–G6 w wiolinowym, F1–B4 w basowym)'
+  },
+  {
+    id: '5',
+    name: '5 linii (standard)',
+    compactName: '5L',
+    badgeLabel: '5 linii',
+    group: 'standard',
+    linesBetween: 5,
+    minTreble: 'B2',
+    maxTreble: 'B6',
+    minBass: 'D1',
+    maxBass: 'D5',
+    sortWeight: 5,
+    description: 'Symetrycznie 5 linii poza pięciolinią (B2–B6 w wiolinowym, D1–D5 w basowym)'
+  },
+
+  // Keyboard C2–C7: 2 kreski w basie (C2) i do C7 w wiolinowym (5 kresek + pole)
+  {
+    id: 'kb1',
+    name: 'Keyboard C2–C7: 1 linia między (C4)',
+    compactName: 'C2-C7 (1L)',
+    badgeLabel: 'C2-C7 (1L między)',
+    group: 'keyboard',
+    linesBetween: 1,
+    minTreble: 'C4',
+    maxTreble: 'C7',
+    minBass: 'C2',
+    maxBass: 'C4',
+    sortWeight: 11,
+    description: 'Dla keyboardu C2–C7: 2 kreski w basie (C2), do C7 w wiolinowym. Między pięcioliniami: 1 linia (C4).'
+  },
+  {
+    id: 'kb2',
+    name: 'Keyboard C2–C7: 2 linie między (A3 / E4)',
+    compactName: 'C2-C7 (2L)',
+    badgeLabel: 'C2-C7 (2L między)',
+    group: 'keyboard',
+    linesBetween: 2,
+    minTreble: 'A3',
+    maxTreble: 'C7',
+    minBass: 'C2',
+    maxBass: 'E4',
+    sortWeight: 12,
+    description: 'Dla keyboardu C2–C7: 2 kreski w basie (C2), do C7 w wiolinowym. Między pięcioliniami: 2 linie (do A3 / E4).'
+  },
+  {
+    id: 'kb3',
+    name: 'Keyboard C2–C7: 3 linie między (F3 / G4)',
+    compactName: 'C2-C7 (3L)',
+    badgeLabel: 'C2-C7 (3L między)',
+    group: 'keyboard',
+    linesBetween: 3,
+    minTreble: 'F3',
+    maxTreble: 'C7',
+    minBass: 'C2',
+    maxBass: 'G4',
+    sortWeight: 13,
+    description: 'Dla keyboardu C2–C7: 2 kreski w basie (C2), do C7 w wiolinowym. Między pięcioliniami: 3 linie (do F3 / G4).'
+  },
+  {
+    id: 'kb4',
+    name: 'Keyboard C2–C7: 4 linie między (D3 / B4)',
+    compactName: 'C2-C7 (4L)',
+    badgeLabel: 'C2-C7 (4L między)',
+    group: 'keyboard',
+    linesBetween: 4,
+    minTreble: 'D3',
+    maxTreble: 'C7',
+    minBass: 'C2',
+    maxBass: 'B4',
+    sortWeight: 14,
+    description: 'Dla keyboardu C2–C7: 2 kreski w basie (C2), do C7 w wiolinowym. Między pięcioliniami: 4 linie (do D3 / B4).'
+  },
+  {
+    id: 'kb5',
+    name: 'Keyboard C2–C7: 5 linii między (B2 / D5)',
+    compactName: 'C2-C7 (5L)',
+    badgeLabel: 'C2-C7 (5L między)',
+    group: 'keyboard',
+    linesBetween: 5,
+    minTreble: 'B2',
+    maxTreble: 'C7',
+    minBass: 'C2',
+    maxBass: 'D5',
+    sortWeight: 15,
+    description: 'Dla keyboardu C2–C7: 2 kreski w basie (C2), do C7 w wiolinowym. Między pięcioliniami: 5 linii (do B2 / D5).'
+  },
+];
+
+export const getLedgerOption = (id: string | number): LedgerOption => {
+  const strId = String(id);
+  const found = ALL_LEDGER_OPTIONS.find(o => o.id === strId);
+  if (found) return found;
+  const num = parseInt(strId, 10);
+  if (!isNaN(num) && num >= 1 && num <= 5) {
+    return ALL_LEDGER_OPTIONS.find(o => o.id === String(num)) || ALL_LEDGER_OPTIONS[1];
+  }
+  return ALL_LEDGER_OPTIONS[1]; // default 2 lines
+};
+
+const pitchToMidi = (p: string): number => {
+  const noteMatch = p.toUpperCase().match(/^([A-G][#B]?)(-?\d+)$/);
+  if (!noteMatch) return 60;
+  const note = noteMatch[1];
+  const oct = parseInt(noteMatch[2], 10);
+  const semitones: Record<string, number> = {
+    'C': 0, 'B#': 0,
+    'C#': 1, 'DB': 1,
+    'D': 2,
+    'D#': 3, 'EB': 3,
+    'E': 4, 'FB': 4,
+    'F': 5, 'E#': 5,
+    'F#': 6, 'GB': 6,
+    'G': 7,
+    'G#': 8, 'AB': 8,
+    'A': 9,
+    'A#': 10, 'BB': 10,
+    'B': 11, 'CB': 11
+  };
+  return (oct + 1) * 12 + (semitones[note] ?? 0);
+};
+
+const getNotePool = (clef: 'treble' | 'bass', ledgerLines: number | string) => {
+  const opt = getLedgerOption(ledgerLines);
   if (clef === 'treble') {
-    // Treble staff lines: E4 to F5
-    // Below: D4 (space), C4 (1 line), B3 (space), A3 (2 lines), G3 (space), F3 (3 lines), E3 (space), D3 (4 lines), C3 (space), B2 (5 lines)
-    const minNoteIndex = 2 - ledgerLines * 2; // B2 is index 6 in oct 2.
-    // Above: G5 (space), A5 (1 line), B5 (space), C6 (2 lines), D6 (space), E6 (3 lines), F6 (space), G6 (4 lines), A6 (space), B6 (5 lines)
-    const maxNoteIndex = 3 + ledgerLines * 2; // B6 is index 6 in oct 6.
-    
-    // Let's just hardcode the ranges for clarity as requested (up to 5 lines)
-    const ranges: Record<number, { min: string, max: string }> = {
-      1: { min: 'C4', max: 'A5' },
-      2: { min: 'A3', max: 'C6' },
-      3: { min: 'F3', max: 'E6' },
-      4: { min: 'D3', max: 'G6' },
-      5: { min: 'B2', max: 'B6' }
-    };
-    const r = ranges[ledgerLines] || ranges[2];
-    return generateRange(r.min, r.max);
+    return generateRange(opt.minTreble, opt.maxTreble);
   } else {
-    const ranges: Record<number, { min: string, max: string }> = {
-      1: { min: 'E2', max: 'C4' },
-      2: { min: 'C2', max: 'E4' },
-      3: { min: 'A1', max: 'G4' },
-      4: { min: 'F1', max: 'B4' },
-      5: { min: 'D1', max: 'D5' }
-    };
-    const r = ranges[ledgerLines] || ranges[2];
-    return generateRange(r.min, r.max);
+    return generateRange(opt.minBass, opt.maxBass);
   }
 };
 
@@ -187,7 +357,7 @@ const parseConfigKey = (key: string) => {
     const keySigPart = parts.slice(0, parts.length - 3).join('_');
     
     const notesNum = parseInt(notesPart, 10) || 1;
-    const ledgerNum = parseInt(ledgerPart, 10) || 0;
+    const ledgerOpt = getLedgerOption(ledgerPart);
 
     let accidentalsCount = 0;
     const sig = KEY_SIGNATURES[keySigPart as keyof typeof KEY_SIGNATURES];
@@ -198,10 +368,11 @@ const parseConfigKey = (key: string) => {
     return {
       keySignature: keySigPart,
       maxNotesPerSpawn: `${notesPart} ${notesNum === 1 ? 'nuta' : (notesNum < 5 ? 'nuty' : 'nut')}`,
-      ledgerLines: `${ledgerPart} ${ledgerNum === 1 ? 'linia dodana' : (ledgerNum < 5 ? 'linie dodane' : 'linii dodanych')}`,
+      ledgerLines: ledgerOpt.badgeLabel,
+      ledgerKey: ledgerPart,
       useAccidentals: accPart === 'acc' ? 'Ze znakami' : 'Bez znaków',
       rawNotes: notesNum,
-      rawLedger: ledgerNum,
+      rawLedger: ledgerOpt.sortWeight,
       rawAccidentals: accPart === 'acc' ? 1 : 0,
       accidentalsCount
     };
@@ -210,9 +381,10 @@ const parseConfigKey = (key: string) => {
     keySignature: key,
     maxNotesPerSpawn: '',
     ledgerLines: '',
+    ledgerKey: '2',
     useAccidentals: '',
     rawNotes: 1,
-    rawLedger: 0,
+    rawLedger: 2,
     rawAccidentals: 0,
     accidentalsCount: 0
   };
@@ -288,12 +460,16 @@ const getRankForConfig = (scores: Record<string, number>, targetKey: string): nu
 
 export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
-  const [ledgerLines, setLedgerLines] = useState<number>(() => {
+  const [ledgerLines, setLedgerLines] = useState<number | string>(() => {
     const saved = localStorage.getItem('piano_ledger_lines');
-    return saved !== null ? parseInt(saved, 10) : 2;
+    if (!saved) return 2;
+    if (saved.startsWith('kb')) return saved;
+    const num = parseInt(saved, 10);
+    return isNaN(num) ? 2 : num;
   });
-  const activeLedgerLinesRef = useRef<number>(ledgerLines);
+  const activeLedgerLinesRef = useRef<number | string>(ledgerLines);
   useEffect(() => {
+    localStorage.setItem('piano_ledger_lines', String(ledgerLines));
     activeLedgerLinesRef.current = ledgerLines;
   }, [ledgerLines]);
   const [selectedAccidentals, setSelectedAccidentals] = useState<boolean | 'Random'>(() => {
@@ -841,8 +1017,12 @@ export default function App() {
       if (recordFilters.notes !== 'all' && parsed.rawNotes !== parseInt(recordFilters.notes, 10)) {
         return false;
       }
-      if (recordFilters.ledger !== 'all' && parsed.rawLedger !== parseInt(recordFilters.ledger, 10)) {
-        return false;
+      if (recordFilters.ledger !== 'all') {
+        const matchesKey = parsed.ledgerKey === recordFilters.ledger;
+        const matchesNum = String(parsed.rawLedger) === recordFilters.ledger;
+        if (!matchesKey && !matchesNum) {
+          return false;
+        }
       }
       if (recordFilters.accidentals !== 'all') {
         const isAcc = parsed.rawAccidentals === 1;
@@ -1543,13 +1723,37 @@ export default function App() {
     }
   }, [createFinishedSegmentSummary, selectedKeySignature, selectedMaxNotes, ledgerLines]);
 
-  const handleLedgerLinesChange = useCallback((val: number) => {
+  const handleLedgerLinesChange = useCallback((val: number | string) => {
     if (isPracticeFromRecordsActiveRef.current) {
       setShowPracticeModeLockDialog(true);
       return;
     }
+    const wasPlaying = isPlayingRef.current;
+    if (wasPlaying) {
+      calculateAndSavePace();
+    }
     setLedgerLines(val);
-  }, []);
+    activeLedgerLinesRef.current = val;
+
+    if (wasPlaying) {
+      segmentStartHitsRef.current = correctHitsRef.current;
+      segmentStartDurationMsRef.current = activeDurationMsRef.current;
+      segmentMeasuresCompletedRef.current = 0;
+      setSegmentMeasuresCompleted(0);
+      lastMeasurePaceRef.current = null;
+      setCurrentPace(null);
+      setPaceTrend(null);
+
+      const nextConfigKey = `${activeKeySignatureRef.current}_${activeMaxNotesRef.current}_${val}_${activeUseAccidentalsRef.current ? 'acc' : 'noacc'}`;
+      const nextScore = highScoresRef.current[nextConfigKey] || 0;
+      const rankVal = getRankForConfig(highScoresRef.current, nextConfigKey);
+      segmentInitialRecordRef.current = nextScore;
+      segmentInitialRankRef.current = rankVal;
+      startRanksRef.current[nextConfigKey] = rankVal;
+      startScoresRef.current[nextConfigKey] = nextScore;
+      setStartRanks(prev => ({ ...prev, [nextConfigKey]: rankVal }));
+    }
+  }, [calculateAndSavePace]);
 
   const handleApplyRecordConfig = useCallback((keyToApply: string) => {
     const parsed = parseConfigKey(keyToApply);
@@ -1565,11 +1769,11 @@ export default function App() {
     }
 
     handleMaxNotesChange(parsed.rawNotes);
-    setLedgerLines(parsed.rawLedger);
+    handleLedgerLinesChange(parsed.ledgerKey);
     handleAccidentalsChange(parsed.rawAccidentals === 1);
 
     setShowRecordsModal(false);
-  }, [handleKeySignatureChange, handleMaxNotesChange, handleAccidentalsChange]);
+  }, [handleKeySignatureChange, handleMaxNotesChange, handleLedgerLinesChange, handleAccidentalsChange]);
 
   const generateMeasure = useCallback(() => {
     let currentKey = activeKeySignatureRef.current;
@@ -1604,7 +1808,7 @@ export default function App() {
         const nextKey = (parsed.keySignature as keyof typeof KEY_SIGNATURES) || currentKey;
         const nextMaxNotes = parsed.rawNotes || currentMaxNotes;
         const nextAccidentals = parsed.rawAccidentals === 1;
-        const nextLedger = parsed.rawLedger !== undefined ? parsed.rawLedger : currentLedger;
+        const nextLedger = parsed.ledgerKey !== undefined ? parsed.ledgerKey : currentLedger;
 
         if (needsChange) {
           const finishedKey = currentKey;
@@ -1917,6 +2121,15 @@ export default function App() {
           measureAccidentals.set(accidentalKey, targetMod);
         }
 
+        const isKeyboardRange = String(currentLedger).startsWith('kb');
+        if (isKeyboardRange) {
+          const midiVal = pitchToMidi(finalActualPitch);
+          if (midiVal < 36 || midiVal > 96) {
+            finalActualPitch = basePitch;
+            accidental = null;
+          }
+        }
+
         newNotes.push({
           id: Date.now() + Math.random() + i + beatIndex * 10,
           displayPitch: displayPitch,
@@ -1962,10 +2175,10 @@ export default function App() {
       activeUseAccidentalsRef.current = parsed.rawAccidentals === 1;
       setActiveUseAccidentals(parsed.rawAccidentals === 1);
       setSelectedAccidentals(parsed.rawAccidentals === 1);
-      activeLedgerLinesRef.current = parsed.rawLedger;
-      setLedgerLines(parsed.rawLedger);
+      activeLedgerLinesRef.current = parsed.ledgerKey;
+      setLedgerLines(parsed.ledgerKey);
 
-      const startConfigKey = `${parsed.keySignature}_${parsed.rawNotes}_${parsed.rawLedger}_${parsed.rawAccidentals === 1 ? 'acc' : 'noacc'}`;
+      const startConfigKey = `${parsed.keySignature}_${parsed.rawNotes}_${parsed.ledgerKey}_${parsed.rawAccidentals === 1 ? 'acc' : 'noacc'}`;
       const currentRec = highScoresRef.current[startConfigKey] || 0;
       const currentRk = currentRec > 0 ? getRankForConfig(highScoresRef.current, startConfigKey) : null;
       segmentInitialRecordRef.current = currentRec;
@@ -2530,7 +2743,11 @@ const getPitchClass = (p: string): number | null => {
             } ${
               isDarkMode ? 'bg-zinc-900 border-zinc-800 text-zinc-200' : 'bg-white border-neutral-200 text-neutral-900'
             }`}
-            title={isPracticeFromRecordsActive ? `Linie dodane w tym rekordzie: ${ledgerLines} (kliknij, aby zarządzać trybem)` : undefined}
+            title={
+              isPracticeFromRecordsActive 
+                ? `Linie dodane w tym rekordzie: ${getLedgerOption(ledgerLines).name} (kliknij, aby zarządzać trybem)` 
+                : getLedgerOption(ledgerLines).description
+            }
           >
             {!isCompact && <span className={`text-[10px] font-bold uppercase ${isDarkMode ? 'text-zinc-500' : 'text-neutral-400'}`}>Lines:</span>}
             <select 
@@ -2546,13 +2763,24 @@ const getPitchClass = (p: string): number | null => {
                   setShowPracticeModeLockDialog(true);
                   return;
                 }
-                handleLedgerLinesChange(parseInt(e.target.value));
+                handleLedgerLinesChange(e.target.value);
               }}
               className={`${isCompact ? 'text-[10px]' : 'text-xs'} font-bold outline-none bg-transparent cursor-pointer ${isDarkMode ? 'text-zinc-200 [&>option]:bg-zinc-900 [&>option]:text-zinc-200' : 'text-neutral-900'}`}
             >
-              {[1, 2, 3, 4, 5].map(v => (
-                <option key={v} value={v} className={isDarkMode ? 'bg-zinc-900 text-zinc-100' : ''}>{isCompact ? `L${v}` : v}</option>
-              ))}
+              <optgroup label="Standardowe (symetryczne)" className={isDarkMode ? 'bg-zinc-900 text-zinc-400 font-normal' : 'text-neutral-500 font-normal'}>
+                {ALL_LEDGER_OPTIONS.filter(o => o.group === 'standard').map(opt => (
+                  <option key={opt.id} value={opt.id} className={isDarkMode ? 'bg-zinc-900 text-zinc-100 font-bold' : 'text-neutral-900 font-bold'}>
+                    {isCompact ? opt.compactName : opt.name}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Keyboard C2–C7 (2 w basie, do C7 w wiol.)" className={isDarkMode ? 'bg-zinc-900 text-zinc-400 font-normal' : 'text-neutral-500 font-normal'}>
+                {ALL_LEDGER_OPTIONS.filter(o => o.group === 'keyboard').map(opt => (
+                  <option key={opt.id} value={opt.id} className={isDarkMode ? 'bg-zinc-900 text-zinc-100 font-bold' : 'text-neutral-900 font-bold'}>
+                    {isCompact ? opt.compactName : opt.name}
+                  </option>
+                ))}
+              </optgroup>
             </select>
           </div>
 
@@ -2752,7 +2980,7 @@ const getPitchClass = (p: string): number | null => {
                         activeUseAccidentalsRef.current = accidentalsToUse;
                         setActiveUseAccidentals(accidentalsToUse);
                         setSelectedAccidentals(accidentalsToUse);
-                        ledgerToUse = parsed.rawLedger;
+                        ledgerToUse = parsed.ledgerKey;
                         activeLedgerLinesRef.current = ledgerToUse;
                         setLedgerLines(ledgerToUse);
                       }
@@ -3636,15 +3864,33 @@ const getPitchClass = (p: string): number | null => {
                               : (isDarkMode ? 'bg-zinc-800/90 border-zinc-700 text-zinc-200' : 'bg-neutral-50 border-neutral-300 text-neutral-800')
                           }`}
                         >
-                          <option value="all">Wszystkie (1-5)</option>
-                          {[1, 2, 3, 4, 5].map(l => {
-                            const count = allValidRecords.filter(([recKey]) => parseConfigKey(recKey)?.rawLedger === l).length;
-                            return (
-                              <option key={l} value={String(l)} disabled={count === 0}>
-                                {l} {l === 1 ? 'linia' : (l < 5 ? 'linie' : 'linii')} ({count})
-                              </option>
-                            );
-                          })}
+                          <option value="all">Wszystkie linie ({allValidRecords.length})</option>
+                          <optgroup label="Standardowe (symetryczne)">
+                            {ALL_LEDGER_OPTIONS.filter(o => o.group === 'standard').map(opt => {
+                              const count = allValidRecords.filter(([recKey]) => {
+                                const p = parseConfigKey(recKey);
+                                return p.ledgerKey === opt.id || String(p.rawLedger) === opt.id;
+                              }).length;
+                              return (
+                                <option key={opt.id} value={opt.id} disabled={count === 0}>
+                                  {opt.name} ({count})
+                                </option>
+                              );
+                            })}
+                          </optgroup>
+                          <optgroup label="Keyboard C2–C7">
+                            {ALL_LEDGER_OPTIONS.filter(o => o.group === 'keyboard').map(opt => {
+                              const count = allValidRecords.filter(([recKey]) => {
+                                const p = parseConfigKey(recKey);
+                                return p.ledgerKey === opt.id;
+                              }).length;
+                              return (
+                                <option key={opt.id} value={opt.id} disabled={count === 0}>
+                                  {opt.name} ({count})
+                                </option>
+                              );
+                            })}
+                          </optgroup>
                         </select>
                       </div>
 

@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 interface PianoProps {
   onNotePress: (note: string) => void;
   activeNotes: Map<string, 'hit' | 'miss' | 'wrong-octave' | 'default'>;
-  ledgerLines: number;
+  ledgerLines: number | string;
   isCompact?: boolean;
   isDarkMode?: boolean;
 }
@@ -132,10 +132,13 @@ const KeyButton: React.FC<KeyButtonProps> = ({
 };
 
 export const Piano: React.FC<PianoProps> = React.memo(({ onNotePress, activeNotes, ledgerLines, isCompact = false, isDarkMode = false }) => {
+  const isKeyboardMode = typeof ledgerLines === 'string' && ledgerLines.startsWith('kb');
   // Determine octave range based on ledger lines
-  // N=1: 2-5, N=2+: 1-6 (starting at octave 1 ensures B1 is available for flat keys like Gb/Eb is)
-  const startOctave = ledgerLines >= 2 ? 1 : 2;
-  const endOctave = (ledgerLines === 1) ? 5 : 6;
+  // Standard N=1: 2-5, Standard N>=2: 1-6
+  // Keyboard C2-C7 mode: strictly octaves 2-6 with final C7 key (exact 61-key keyboard layout)
+  const isStandardN1 = ledgerLines === 1 || ledgerLines === '1';
+  const startOctave = isKeyboardMode ? 2 : (isStandardN1 ? 2 : 1);
+  const endOctave = isStandardN1 ? 5 : 6;
   
   const containerRef = useRef<HTMLDivElement>(null);
   const c4Ref = useRef<HTMLDivElement>(null);
@@ -184,7 +187,7 @@ export const Piano: React.FC<PianoProps> = React.memo(({ onNotePress, activeNote
     octaves.push(i);
   }
 
-  const ALL_KEYS = octaves.flatMap((octave) =>
+  const generatedKeys = octaves.flatMap((octave) =>
     NOTES.map((note) => ({
       name: `${note}${octave}`,
       note,
@@ -193,6 +196,17 @@ export const Piano: React.FC<PianoProps> = React.memo(({ onNotePress, activeNote
     }))
   );
 
+  // If in keyboard mode or register extends to octave 6, include the top C7 key
+  if (isKeyboardMode || endOctave >= 6) {
+    generatedKeys.push({
+      name: 'C7',
+      note: 'C',
+      octave: 7,
+      isBlack: false,
+    });
+  }
+
+  const ALL_KEYS = generatedKeys;
   const WHITE_KEYS = ALL_KEYS.filter(k => !k.isBlack);
 
   const keyHeight = isCompact ? 140 : 176; // 44*4
