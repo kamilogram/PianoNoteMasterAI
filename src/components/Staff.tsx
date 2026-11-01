@@ -275,40 +275,80 @@ export const Staff: React.FC<StaffProps> = React.memo(({
       }
     }
 
-    // 1. Draw stems and ledger lines first
+    // 1. Draw stems (unified direction per staff and beat) and ledger lines
+    // Group notes by beat and clef to ensure that multiple notes on the same staff in the same beat
+    // always share the exact same stem direction and a unified chord stem (standard music notation)
+    const clefs: ('treble' | 'bass')[] = ['treble', 'bass'];
+    const activeBeats = Array.from(new Set(notes.map(n => n.beatIndex)));
+
+    clefs.forEach(clef => {
+      const yBase = clef === 'treble' ? 0 : BASS_OFFSET;
+      const staffMidLine = yBase + STAFF_PADDING + 2 * LINE_SPACING;
+
+      activeBeats.forEach(b => {
+        const chordNotes = notes.filter(n => n.beatIndex === b && n.clef === clef);
+        if (chordNotes.length === 0) return;
+
+        const noteData = chordNotes.map(n => {
+          const y = yBase + getNoteY(n.displayPitch, n.clef, STAFF_PADDING, LINE_SPACING);
+          const dist = y - staffMidLine; // dist < 0 means above middle line, dist > 0 means below middle line
+          return { note: n, y, dist };
+        });
+
+        // Determine unified stem direction:
+        // The note furthest from the staff middle line dictates the stem direction for the entire chord on this staff.
+        // - Furthest note above middle line (dist < 0): stem points DOWN
+        // - Furthest note below middle line (dist > 0): stem points UP
+        // - Equidistant or on middle line: stem points DOWN (standard engraving rule)
+        let maxAbsDist = 0;
+        let furthestDist = 0;
+        for (const item of noteData) {
+          const absDist = Math.abs(item.dist);
+          if (absDist > maxAbsDist) {
+            maxAbsDist = absDist;
+            furthestDist = item.dist;
+          }
+        }
+
+        const isStemDown = furthestDist <= 0;
+
+        const allHit = chordNotes.every(n => n.isHit);
+        const isStemGreen = Boolean(isListeningMode && allHit);
+        const hitGreenColor = isDarkMode ? '#4ade80' : '#16a34a';
+
+        ctx.strokeStyle = isStemGreen ? hitGreenColor : primaryNoteColor;
+        ctx.lineWidth = isCompact ? 1.2 : 1.8;
+        ctx.beginPath();
+        const stemHeight = isCompact ? 35 : 52;
+        const noteX = chordNotes[0].x;
+
+        const noteYs = noteData.map(d => d.y);
+        const minY = Math.min(...noteYs); // Highest notehead on screen
+        const maxY = Math.max(...noteYs); // Lowest notehead on screen
+
+        if (isStemDown) {
+          // Stem attaches to the left of noteheads and extends downwards from the highest notehead past the lowest notehead
+          const stemXOffset = isCompact ? -7 : -11;
+          const stemX = noteX + stemXOffset;
+          ctx.moveTo(stemX, minY);
+          ctx.lineTo(stemX, maxY + stemHeight);
+        } else {
+          // Stem attaches to the right of noteheads and extends upwards from the lowest notehead past the highest notehead
+          const stemXOffset = isCompact ? 7 : 11;
+          const stemX = noteX + stemXOffset;
+          ctx.moveTo(stemX, maxY);
+          ctx.lineTo(stemX, minY - stemHeight);
+        }
+        ctx.stroke();
+      });
+    });
+
+    // Draw ledger lines per note
     notes.forEach(note => {
-      const isHit = !!note.isHit;
-      
-      // Green color in sound listening mode for correctly hit notes
-      const isGreen = Boolean(isListeningMode && isHit);
-      const hitGreenColor = isDarkMode ? '#4ade80' : '#16a34a';
-
       ctx.globalAlpha = 1.0;
-
       const yBase = note.clef === 'treble' ? 0 : BASS_OFFSET;
       const y = yBase + getNoteY(note.displayPitch, note.clef, STAFF_PADDING, LINE_SPACING);
 
-      // Stem (notes on middle line and above point down into staff, below middle line point up into staff)
-      const staffMidLine = yBase + STAFF_PADDING + 2 * LINE_SPACING;
-      const isStemDown = y <= staffMidLine;
-
-      ctx.strokeStyle = isGreen ? hitGreenColor : primaryNoteColor;
-      ctx.lineWidth = isCompact ? 1.2 : 1.8;
-      ctx.beginPath();
-      const stemHeight = isCompact ? 35 : 52;
-
-      if (isStemDown) {
-        const stemXOffset = isCompact ? -7 : -11;
-        ctx.moveTo(note.x + stemXOffset, y);
-        ctx.lineTo(note.x + stemXOffset, y + stemHeight);
-      } else {
-        const stemXOffset = isCompact ? 7 : 11;
-        ctx.moveTo(note.x + stemXOffset, y);
-        ctx.lineTo(note.x + stemXOffset, y - stemHeight);
-      }
-      ctx.stroke();
-
-      // Ledger lines
       ctx.strokeStyle = ledgerLineColor;
       const staffTopLine = yBase + STAFF_PADDING;
       const staffBottomLine = yBase + STAFF_PADDING + 4 * LINE_SPACING;

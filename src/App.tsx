@@ -1364,6 +1364,17 @@ export default function App() {
   const currentBeatRef = useRef<number>(0);
   const lastPressBeatRef = useRef<number>(0);
   const wrongPitchesInCurrentBeatRef = useRef<{ beat: number; pitches: Set<string> }>({ beat: 0, pitches: new Set() });
+  // Tracks timestamps and beat index of hits per pitch to prevent acoustic sound bleed from consecutive identical notes
+  const lastHitPitchesRef = useRef<Map<string, { beat: number; time: number }>>(new Map());
+  // Tracks strokeId used per sounding pitch to ensure ONE physical strike cannot credit consecutive beats with the same note
+  const lastHitStrokeIdByPitchRef = useRef<Map<string, number>>(new Map());
+  // Tracks info of the immediately completed beat and when the transition occurred
+  const lastCompletedBeatInfoRef = useRef<{ beat: number; pitches: Set<string>; completedAt: number }>({
+    beat: -1,
+    pitches: new Set(),
+    completedAt: 0
+  });
+  const beatActivatedAtRef = useRef<number>(Date.now());
 
   useEffect(() => {
     const mql = window.matchMedia('(min-width: 768px) and (orientation: landscape)');
@@ -2196,6 +2207,10 @@ export default function App() {
     setMeasureId(id => id + 1);
     setActivePianoNotes(new Map());
     lastPressBeatRef.current = 0;
+    lastHitPitchesRef.current.clear();
+    lastHitStrokeIdByPitchRef.current.clear();
+    lastCompletedBeatInfoRef.current = { beat: -1, pitches: new Set(), completedAt: 0 };
+    beatActivatedAtRef.current = Date.now();
   }, [createFinishedSegmentSummary, selectedKeySignature, selectedMaxNotes, selectedAccidentals, ledgerLines]);
 
   const startTrainingSelectedRecords = useCallback((keysToUse?: string[]) => {
@@ -2290,7 +2305,7 @@ const getPitchClass = (p: string): number | null => {
   return PITCH_CLASS_MAP[noteName] ?? null;
 };
 
-  const handlePianoPress = useCallback((pitch: string, isFromAudioInput = false) => {
+  const handlePianoPress = useCallback((pitch: string, isFromAudioInput = false, strokeId?: number, isNewAttack = false) => {
     if (soundEnabled) {
       audioService.playNote(pitch);
     }
@@ -2334,8 +2349,52 @@ const getPitchClass = (p: string): number | null => {
     let isLastOfBeat = false;
     const isListeningModeActive = isFromAudioInput || isListeningModeRef.current || audioInputStatus.isMicActive || audioInputStatus.isMidiConnected;
 
+    // Protection against acoustic bleed on consecutive beats with the same sounding pitch:
+    // If the immediately preceding beat contained the exact same sounding pitch (actualPitch, e.g. C4),
+    // regardless of which staff/clef it is placed on, prevent lingering acoustic reverberation from auto-clearing this beat.
+    if (matchingNote && isListeningModeActive) {
+      const isRepeatedFromPrevBeat = (
+        lastCompletedBeatInfoRef.current.beat === beat - 1 &&
+        lastCompletedBeatInfoRef.current.pitches.has(matchingNote.actualPitch)
+      ) || (
+        beat > 0 && currentNotes.some(n => n.beatIndex === beat - 1 && n.actualPitch === matchingNote.actualPitch)
+      );
+
+      if (isRepeatedFromPrevBeat) {
+        // 1. One physical strike cannot credit two beats:
+        // If this event has a strokeId, it MUST be strictly greater than the strokeId used to hit this pitch in the previous beat!
+        if (strokeId !== undefined) {
+          const prevStrokeId = lastHitStrokeIdByPitchRef.current.get(matchingNote.actualPitch);
+          if (prevStrokeId !== undefined && strokeId <= prevStrokeId) {
+            return; // Reject: same physical strike from previous beat
+          }
+        }
+
+        // 2. Minimum interval between consecutive physical strikes of the exact same pitch:
+        // A human pianist takes at least 350ms between repeated strikes. Any event earlier is lingering acoustic resonance.
+        const prevHitInfo = lastHitPitchesRef.current.get(matchingNote.actualPitch);
+        if (prevHitInfo) {
+          const elapsed = Date.now() - prevHitInfo.time;
+          if (elapsed < 350) {
+            return; // Reject: acoustic reverberation within 350ms
+          }
+        }
+
+        // 3. Beat transition guard:
+        // When entering a new beat with the same pitch, lingering audio from the boundary cannot trigger it
+        const timeSinceBeatActivated = Date.now() - beatActivatedAtRef.current;
+        if (timeSinceBeatActivated < 200 && isFromAudioInput && !isNewAttack) {
+          return; // Reject: bleed right at beat transition boundary
+        }
+      }
+    }
+
     if (matchingNote) {
       status = 'hit';
+      lastHitPitchesRef.current.set(matchingNote.actualPitch, { beat, time: Date.now() });
+      if (strokeId !== undefined) {
+        lastHitStrokeIdByPitchRef.current.set(matchingNote.actualPitch, strokeId);
+      }
       setScore(s => s + 10);
       setCorrectHits(c => {
         const next = c + 1;
@@ -2352,6 +2411,13 @@ const getPitchClass = (p: string): number | null => {
       
       if (newUnplayed.length === 0) {
         isLastOfBeat = true;
+        const pitchesInThisBeat = new Set(notesRef.current.filter(n => n.beatIndex === beat).map(n => n.actualPitch));
+        lastCompletedBeatInfoRef.current = {
+          beat,
+          pitches: pitchesInThisBeat,
+          completedAt: Date.now()
+        };
+        beatActivatedAtRef.current = Date.now();
         if (beat < 3) {
           currentBeatRef.current = beat + 1;
           setCurrentBeat(beat + 1);
@@ -2473,9 +2539,9 @@ const getPitchClass = (p: string): number | null => {
 
   useEffect(() => {
     audioInputService.setCallbacks(
-      (pitch) => {
+      (pitch, strokeId, isNewAttack) => {
         const calibratedPitch = remapPitchRef.current(pitch);
-        handlePianoPressRef.current(calibratedPitch, true);
+        handlePianoPressRef.current(calibratedPitch, true, strokeId, isNewAttack);
       },
       (status) => {
         setAudioInputStatus(status);
@@ -2500,6 +2566,10 @@ const getPitchClass = (p: string): number | null => {
     activeDurationMsRef.current = 0;
     setActivePianoNotes(new Map());
     lastPressBeatRef.current = 0;
+    lastHitPitchesRef.current.clear();
+    lastHitStrokeIdByPitchRef.current.clear();
+    lastCompletedBeatInfoRef.current = { beat: -1, pitches: new Set(), completedAt: 0 };
+    beatActivatedAtRef.current = Date.now();
     measuresPlayedRef.current = 0;
     setCorrectHits(0);
     correctHitsRef.current = 0;

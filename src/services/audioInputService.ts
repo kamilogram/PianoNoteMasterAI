@@ -17,7 +17,7 @@ export interface AudioInputStatus {
   micError: string | null;
 }
 
-type PitchCallback = (pitch: string) => void;
+export type PitchCallback = (pitch: string, strokeId?: number, isNewAttack?: boolean) => void;
 type StatusCallback = (status: AudioInputStatus) => void;
 
 class AudioInputService {
@@ -30,10 +30,17 @@ class AudioInputService {
   private onPitchCallback: PitchCallback | null = null;
   private onStatusCallback: StatusCallback | null = null;
 
+  private strokeCounter: number = 0;
   private lastDetectedPitch: string | null = null;
   private lastTriggeredPitch: string | null = null;
   private lastPitchTime: number = 0;
   private pitchStableCount: number = 0;
+
+  // Onset attack detection and repeated note protection
+  private minRmsSinceTrigger: number = 1.0;
+  private silentFramesCount: number = 0;
+  private isSamePitchArmed: boolean = true;
+  private previousRms: number = 0;
 
   private highpassFilter: BiquadFilterNode | null = null;
   private bassBoostFilter: BiquadFilterNode | null = null;
@@ -113,8 +120,9 @@ class AudioInputService {
       const octave = Math.floor(note / 12) - 1;
       const pitch = `${pitchName}${octave}`;
 
+      this.strokeCounter++;
       if (this.onPitchCallback) {
-        this.onPitchCallback(pitch);
+        this.onPitchCallback(pitch, this.strokeCounter, true);
       }
     }
   }
@@ -219,6 +227,10 @@ class AudioInputService {
     this.status.detectedPitch = null;
     this.status.detectedFrequency = null;
     this.status.volumeLevel = 0;
+    this.isSamePitchArmed = true;
+    this.lastTriggeredPitch = null;
+    this.minRmsSinceTrigger = 1.0;
+    this.silentFramesCount = 0;
     this.notifyStatus();
   }
 
@@ -248,6 +260,9 @@ class AudioInputService {
 
     // Noise gate threshold: 0.0035 captures gentle playing while ignoring ambient room silence
     if (rms > 0.0035) {
+      // Sound IS present in the room: reset silent frames counter
+      this.silentFramesCount = 0;
+
       const freq = this.detectPitchYin(buffer, this.audioContext?.sampleRate || 44100);
       
       if (freq !== -1) {
@@ -265,21 +280,68 @@ class AudioInputService {
           this.pitchStableCount = 1;
         }
 
-        // Trigger note press if pitch is stable and cooldown elapsed
-        const minCooldown = (newPitch !== this.lastTriggeredPitch) ? 100 : 200;
-        if (this.pitchStableCount >= 2 && (now - this.lastPitchTime > minCooldown)) {
+        const isSamePitch = (newPitch === this.lastTriggeredPitch);
+
+        // Track minimum RMS during sustain for the current note to detect re-attacks
+        if (isSamePitch) {
+          if (rms < this.minRmsSinceTrigger) {
+            this.minRmsSinceTrigger = rms;
+          }
+        }
+
+        // Onset attack detection for repeated identical note:
+        // A physical re-strike on acoustic piano produces an acoustic attack transient (surge in RMS).
+        // A single sustained or ringing note decays monotonically and will NEVER re-trigger.
+        const rmsRise = rms - this.minRmsSinceTrigger;
+        const rmsRatio = this.minRmsSinceTrigger > 0 ? (rms / this.minRmsSinceTrigger) : 1;
+        const rmsJump = rms - this.previousRms;
+
+        // An authentic physical re-strike on an already sounding string requires:
+        // 1. At least 180ms since previous strike
+        // 2. Clear transient hammer impact: sharp instantaneous rise (rmsJump) AND significant energy surge above decayed sustain level
+        const hasAttackOnset = isSamePitch && 
+          (now - this.lastPitchTime > 180) && 
+          (
+            (rmsJump >= 0.012 && rmsRise >= 0.008) ||
+            (rmsRatio >= 1.7 && rmsRise >= 0.012)
+          );
+
+        if (hasAttackOnset) {
+          this.isSamePitchArmed = true;
+        }
+
+        const canTriggerSamePitch = isSamePitch && this.isSamePitchArmed && (now - this.lastPitchTime > 180);
+        const canTriggerNewPitch = !isSamePitch && (now - this.lastPitchTime > 70);
+
+        if (this.pitchStableCount >= 2 && (canTriggerNewPitch || canTriggerSamePitch)) {
           this.lastPitchTime = now;
           this.lastTriggeredPitch = newPitch;
+          this.isSamePitchArmed = false; // Disarm same pitch until genuine release or new attack onset
+          this.minRmsSinceTrigger = rms;
+          this.strokeCounter++;
           if (this.onPitchCallback) {
-            this.onPitchCallback(newPitch);
+            this.onPitchCallback(newPitch, this.strokeCounter, hasAttackOnset || canTriggerNewPitch);
           }
         }
       } else {
+        // Pitch could not be determined on this frame (harmonic dip or decay),
+        // BUT sound (rms > 0.0035) is still active in the room!
+        // DO NOT reset isSamePitchArmed! DO NOT treat as silence!
         this.pitchStableCount = 0;
       }
     } else {
+      // Genuine acoustic silence below noise gate:
       this.pitchStableCount = 0;
+      this.silentFramesCount++;
+      // If below noise gate for at least 8 frames (~130ms), the previous note has fully stopped/released
+      if (this.silentFramesCount >= 8) {
+        this.isSamePitchArmed = true;
+        this.lastTriggeredPitch = null;
+        this.minRmsSinceTrigger = 1.0;
+      }
     }
+
+    this.previousRms = rms;
 
     const pitchChanged = this.status.detectedPitch !== newPitch;
     const volumeChanged = Math.abs(this.status.volumeLevel - newVolumeLevel) > 0.03;
